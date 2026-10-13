@@ -4,15 +4,16 @@ using VegetableShopAPI.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ??ng ký k?t n?i SQL Server v?i Entity Framework Core
+// ??ng kï¿½ k?t n?i SQL Server v?i Entity Framework Core
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+builder.Services.AddHttpClient();
 
-// Thêm chính sách CORS cho phép Frontend g?i API
+// Thï¿½m chï¿½nh sï¿½ch CORS cho phï¿½p Frontend g?i API
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowReactApp",
@@ -28,7 +29,7 @@ builder.Services.AddScoped<IEmailService, EmailService>();
 
 var app = builder.Build();
 
-// Kích ho?t CORS
+// Kï¿½ch ho?t CORS
 app.UseCors("AllowReactApp");
 
 // Configure the HTTP request pipeline.
