@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using VegetableShopAPI.Data;
+using VegetableShopAPI.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -22,6 +23,8 @@ builder.Services.AddCors(options =>
                   .AllowAnyMethod();
         });
 });
+
+builder.Services.AddScoped<IEmailService, EmailService>();
 
 var app = builder.Build();
 
