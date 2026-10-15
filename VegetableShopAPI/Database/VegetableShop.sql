@@ -68,3 +68,42 @@ INSERT INTO Products (Name, Price, Quantity, Unit, Image, Description, CategoryI
 (N'Khoai tây', 25000, 1, N'kg', 'https://images.unsplash.com/photo-1518977676601-b5ff321036b3?auto=format&fit=crop&w=500&q=80', N'Khoai tây s?ch c? l?n, nhi?u tinh b?t t?t.', 2),
 (N'Táo ??', 45000, 1, N'kg', 'https://images.unsplash.com/photo-1560806887-1e4cd0b6cbd6?auto=format&fit=crop&w=500&q=80', N'Táo nh?p kh?u giòn ng?t, giàu vitamin.', 3),
 (N'N?m kim châm', 18000, 1, N'v?', 'https://images.unsplash.com/photo-1541832676-9b763b0239ab?auto=format&fit=crop&w=500&q=80', N'N?m kim châm t??i ngon cho món l?u.', 4);
+
+
+IF COL_LENGTH('dbo.Products', 'IsActive') IS NULL
+    ALTER TABLE dbo.Products
+    ADD IsActive BIT NOT NULL DEFAULT 1;
+
+IF COL_LENGTH('dbo.Orders', 'RecipientName') IS NULL
+    ALTER TABLE dbo.Orders
+    ADD RecipientName NVARCHAR(100) NOT NULL DEFAULT N'';
+
+IF COL_LENGTH('dbo.Orders', 'Phone') IS NULL
+    ALTER TABLE dbo.Orders
+    ADD Phone NVARCHAR(20) NOT NULL DEFAULT N'';
+
+IF COL_LENGTH('dbo.Orders', 'Note') IS NULL
+    ALTER TABLE dbo.Orders
+    ADD Note NVARCHAR(500) NOT NULL DEFAULT N'';
+
+IF COL_LENGTH('dbo.Orders', 'PaymentMethod') IS NULL
+    ALTER TABLE dbo.Orders
+    ADD PaymentMethod NVARCHAR(20) NOT NULL DEFAULT N'';
+
+IF COL_LENGTH('dbo.Orders', 'ShippingFee') IS NULL
+    ALTER TABLE dbo.Orders
+    ADD ShippingFee DECIMAL(18,2) NULL;
+
+IF COL_LENGTH('dbo.Orders', 'StockDeducted') IS NULL
+    ALTER TABLE dbo.Orders
+    ADD StockDeducted BIT NOT NULL DEFAULT 0;
+
+IF COL_LENGTH('dbo.OrderDetails', 'ProductName') IS NULL
+    ALTER TABLE dbo.OrderDetails
+    ADD ProductName NVARCHAR(150) NOT NULL DEFAULT N'';
+
+IF COL_LENGTH('dbo.OrderDetails', 'Unit') IS NULL
+    ALTER TABLE dbo.OrderDetails
+    ADD Unit NVARCHAR(50) NOT NULL DEFAULT N'';
+
+
