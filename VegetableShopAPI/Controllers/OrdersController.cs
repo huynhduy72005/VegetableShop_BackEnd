@@ -73,6 +73,98 @@ namespace VegetableShopAPI.Controllers
                 pendingOrders
             });
         }
+
+        // GET: api/orders  (có thể lọc theo khách: api/orders?userId=5)
+        [HttpGet]
+        public async Task<IActionResult> GetOrders([FromQuery] int? userId)
+        {
+            var query = _context.Orders.AsNoTracking().AsQueryable();
+            if (userId.HasValue)
+                query = query.Where(o => o.UserId == userId.Value);
+
+            var orders = await (
+                from o in query
+                join usr in _context.Users.AsNoTracking() on o.UserId equals usr.Id into userGroup
+                from u in userGroup.DefaultIfEmpty()
+                orderby o.OrderDate descending, o.Id descending
+                select new
+                {
+                    o.Id,
+                    o.UserId,
+                    CustomerName = u != null ? u.FullName : "Khách vãng lai",
+                    CustomerEmail = u != null ? u.Email : null,
+                    o.OrderDate,
+                    o.TotalPrice,
+                    o.Status,
+                    o.ShippingAddress
+                }).ToListAsync();
+
+            // Đếm số dòng sản phẩm của từng đơn
+            var lineCounts = await _context.OrderDetails.AsNoTracking()
+                .GroupBy(d => d.OrderId)
+                .Select(g => new { OrderId = g.Key, Count = g.Count() })
+                .ToDictionaryAsync(x => x.OrderId, x => x.Count);
+
+            return Ok(orders.Select(o => new
+            {
+                o.Id,
+                o.UserId,
+                o.CustomerName,
+                o.CustomerEmail,
+                o.OrderDate,
+                o.TotalPrice,
+                o.Status,
+                o.ShippingAddress,
+                ItemCount = lineCounts.GetValueOrDefault(o.Id)
+            }));
+        }
+
+        // GET: api/orders/5  (chi tiết một đơn hàng)
+        [HttpGet("{id:int}")]
+        public async Task<IActionResult> GetOrder(int id)
+        {
+            var order = await _context.Orders.AsNoTracking().FirstOrDefaultAsync(o => o.Id == id);
+            if (order == null)
+                return NotFound(new { message = "Không tìm thấy đơn hàng!" });
+
+            var customer = await _context.Users.AsNoTracking()
+                .Where(u => u.Id == order.UserId)
+                .Select(u => new { u.FullName, u.Email })
+                .FirstOrDefaultAsync();
+
+            var items = await (
+                from d in _context.OrderDetails.AsNoTracking()
+                where d.OrderId == id
+                join prod in _context.Products.AsNoTracking() on d.ProductId equals prod.Id into productGroup
+                from p in productGroup.DefaultIfEmpty()
+                select new
+                {
+                    d.Id,
+                    d.ProductId,
+                    ProductName = p != null ? p.Name : null,
+                    Unit = p != null ? p.Unit : null,
+                    Image = p != null ? p.Image : null,
+                    d.Quantity,
+                    d.Price,
+                    LineTotal = d.Quantity * d.Price
+                }).ToListAsync();
+
+            return Ok(new
+            {
+                order.Id,
+                order.UserId,
+                CustomerName = customer != null ? customer.FullName : "Khách vãng lai",
+                CustomerEmail = customer?.Email,
+                order.OrderDate,
+                order.TotalPrice,
+                order.Status,
+                order.ShippingAddress,
+                Items = items
+            });
+        }
+
+
+
     }
 
     // Class phụ trợ (DTO) để nhận dữ liệu JSON từ Frontend gửi lên
@@ -90,6 +182,7 @@ namespace VegetableShopAPI.Controllers
         public int Quantity { get; set; }
         public decimal Price { get; set; }
     }
+
 
 
 
