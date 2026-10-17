@@ -8,5 +8,7 @@
         public decimal TotalPrice { get; set; } // Tổng tiền đơn hàng
         public string Status { get; set; } = "Pending"; // Trạng thái: Pending (Chờ xử lý), Completed (Hoàn thành)...
         public string ShippingAddress { get; set; } = string.Empty; // Địa chỉ giao hàng
+
+
     }
 }
