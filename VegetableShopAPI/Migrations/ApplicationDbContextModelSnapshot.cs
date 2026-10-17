@@ -50,12 +50,31 @@ namespace VegetableShopAPI.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("Note")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<DateTime>("OrderDate")
                         .HasColumnType("datetime2");
+
+                    b.Property<string>("PaymentMethod")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Phone")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("RecipientName")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("ShippingAddress")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<decimal?>("ShippingFee")
+                        .HasColumnType("decimal(18,2)");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -66,6 +85,8 @@ namespace VegetableShopAPI.Migrations
 
                     b.Property<int>("UserId")
                         .HasColumnType("int");
+
+                    b.HasIndex("UserId");
 
                     b.HasKey("Id");
 
@@ -92,6 +113,10 @@ namespace VegetableShopAPI.Migrations
                     b.Property<int>("Quantity")
                         .HasColumnType("int");
 
+                    b.HasIndex("OrderId");
+
+                    b.HasIndex("ProductId");
+
                     b.HasKey("Id");
 
                     b.ToTable("OrderDetails");
@@ -107,6 +132,8 @@ namespace VegetableShopAPI.Migrations
 
                     b.Property<int>("CategoryId")
                         .HasColumnType("int");
+
+                    b.HasIndex("CategoryId");
 
                     b.Property<string>("Description")
                         .HasColumnType("nvarchar(max)");
@@ -154,10 +181,6 @@ namespace VegetableShopAPI.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<string>("Phone")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
                     b.Property<string>("Role")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
@@ -166,6 +189,40 @@ namespace VegetableShopAPI.Migrations
 
                     b.ToTable("Users");
                 });
+
+            modelBuilder.Entity("VegetableShopAPI.Models.Order", b =>
+                {
+                    b.HasOne("VegetableShopAPI.Models.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("VegetableShopAPI.Models.OrderDetail", b =>
+                {
+                    b.HasOne("VegetableShopAPI.Models.Order", null)
+                        .WithMany()
+                        .HasForeignKey("OrderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("VegetableShopAPI.Models.Product", null)
+                        .WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("VegetableShopAPI.Models.Product", b =>
+                {
+                    b.HasOne("VegetableShopAPI.Models.Category", null)
+                        .WithMany()
+                        .HasForeignKey("CategoryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
 #pragma warning restore 612, 618
         }
     }

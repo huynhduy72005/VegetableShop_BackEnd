@@ -10,6 +10,14 @@ namespace VegetableShopAPI.Controllers
     public class OrdersController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
+        private static readonly string[] AllowedOrderStatuses =
+        {
+            "Pending",
+            "Processing",
+            "Shipping",
+            "Completed",
+            "Cancelled"
+        };
 
         public OrdersController(ApplicationDbContext context)
         {
@@ -28,6 +36,11 @@ namespace VegetableShopAPI.Controllers
                     UserId = orderDto.UserId,
                     TotalPrice = orderDto.TotalPrice,
                     ShippingAddress = orderDto.ShippingAddress,
+                    RecipientName = orderDto.RecipientName?.Trim() ?? string.Empty,
+                    Phone = orderDto.Phone?.Trim() ?? string.Empty,
+                    Note = orderDto.Note?.Trim() ?? string.Empty,
+                    PaymentMethod = orderDto.PaymentMethod?.Trim() ?? string.Empty,
+                    ShippingFee = orderDto.ShippingFee,
                     OrderDate = DateTime.Now,
                     Status = "Pending" // Trạng thái chờ xử lý
                 };
@@ -144,25 +157,100 @@ namespace VegetableShopAPI.Controllers
                     ProductName = p != null ? p.Name : null,
                     Unit = p != null ? p.Unit : null,
                     Image = p != null ? p.Image : null,
+                    StockQuantity = p != null ? p.Quantity : 0,
                     d.Quantity,
                     d.Price,
                     LineTotal = d.Quantity * d.Price
                 }).ToListAsync();
 
+            var (shippingAddress, legacyPhone, legacyNote) = ParseLegacyShippingAddress(order.ShippingAddress);
+            var shippingFee = order.ShippingFee ?? Math.Max(
+                0,
+                order.TotalPrice - items.Sum(item => item.LineTotal));
+
             return Ok(new
             {
                 order.Id,
                 order.UserId,
-                CustomerName = customer != null ? customer.FullName : "Khách vãng lai",
+                CustomerName = !string.IsNullOrWhiteSpace(order.RecipientName)
+                    ? order.RecipientName
+                    : customer != null ? customer.FullName : "Khách vãng lai",
                 CustomerEmail = customer?.Email,
+                order.RecipientName,
+                Phone = !string.IsNullOrWhiteSpace(order.Phone) ? order.Phone : legacyPhone,
+                Note = !string.IsNullOrWhiteSpace(order.Note) ? order.Note : legacyNote,
+                order.PaymentMethod,
                 order.OrderDate,
                 order.TotalPrice,
+                ShippingFee = shippingFee,
                 order.Status,
-                order.ShippingAddress,
+                ShippingAddress = shippingAddress,
                 Items = items
             });
         }
 
+        private static (string Address, string Phone, string Note) ParseLegacyShippingAddress(string? shippingAddress)
+        {
+            const string phoneMarker = " - SĐT: ";
+            const string noteMarker = " - Ghi chú: ";
+            var value = shippingAddress ?? string.Empty;
+            var phoneIndex = value.IndexOf(phoneMarker, StringComparison.OrdinalIgnoreCase);
+            var noteIndex = value.IndexOf(noteMarker, StringComparison.OrdinalIgnoreCase);
+            var addressEnd = new[] { phoneIndex, noteIndex }
+                .Where(index => index >= 0)
+                .DefaultIfEmpty(value.Length)
+                .Min();
+
+            var address = value[..addressEnd].Trim();
+            var phone = phoneIndex >= 0
+                ? value[(phoneIndex + phoneMarker.Length)..(noteIndex > phoneIndex ? noteIndex : value.Length)].Trim()
+                : string.Empty;
+            var note = noteIndex >= 0
+                ? value[(noteIndex + noteMarker.Length)..].Trim()
+                : string.Empty;
+
+            return (address, phone, note);
+        }
+
+        // PUT: api/orders/5/status
+        [HttpPut("{id:int}/status")]
+        public async Task<IActionResult> UpdateOrderStatus(int id, [FromBody] UpdateOrderStatusDto request)
+        {
+            if (string.IsNullOrWhiteSpace(request.Status))
+                return BadRequest(new { message = "Trạng thái đơn hàng không được để trống." });
+
+            var status = AllowedOrderStatuses.FirstOrDefault(
+                allowed => string.Equals(allowed, request.Status.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (status == null)
+                return BadRequest(new { message = "Trạng thái đơn hàng không hợp lệ." });
+
+            var order = await _context.Orders.FindAsync(id);
+            if (order == null)
+                return NotFound(new { message = "Không tìm thấy đơn hàng!" });
+
+            order.Status = status;
+            await _context.SaveChangesAsync();
+
+            return Ok(new { success = true, order.Id, order.Status });
+        }
+
+        // PUT: api/orders/5/cancel?userId=1
+        [HttpPut("{id:int}/cancel")]
+        public async Task<IActionResult> CancelOrder(int id, [FromQuery] int userId)
+        {
+            var order = await _context.Orders.FirstOrDefaultAsync(
+                item => item.Id == id && item.UserId == userId);
+            if (order == null)
+                return NotFound(new { message = "Không tìm thấy đơn hàng!" });
+
+            if (!string.Equals(order.Status, "Pending", StringComparison.OrdinalIgnoreCase))
+                return Conflict(new { message = "Chỉ có thể hủy đơn hàng đang chờ xác nhận." });
+
+            order.Status = "Cancelled";
+            await _context.SaveChangesAsync();
+
+            return Ok(new { success = true, order.Id, order.Status });
+        }
 
 
     }
@@ -173,6 +261,11 @@ namespace VegetableShopAPI.Controllers
         public int UserId { get; set; }
         public decimal TotalPrice { get; set; }
         public string ShippingAddress { get; set; } = string.Empty;
+        public string? RecipientName { get; set; }
+        public string? Phone { get; set; }
+        public string? Note { get; set; }
+        public string? PaymentMethod { get; set; }
+        public decimal? ShippingFee { get; set; }
         public List<OrderItemDto> Items { get; set; } = new();
     }
 
@@ -183,6 +276,10 @@ namespace VegetableShopAPI.Controllers
         public decimal Price { get; set; }
     }
 
+    public class UpdateOrderStatusDto
+    {
+        public string? Status { get; set; }
+    }
 
 
 
