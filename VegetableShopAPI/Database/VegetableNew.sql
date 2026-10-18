@@ -1,4 +1,9 @@
-﻿USE [VegetableShopDb];
+﻿IF NOT EXISTS (SELECT * FROM sys.databases WHERE name = 'VegetableShopDb')
+BEGIN
+    CREATE DATABASE [VegetableShopDb];
+END
+GO
+USE [VegetableShopDb];
 GO
 
 -- 1. THÊM DỮ LIỆU BẢNG CATEGORIES (Danh mục rau củ quả)

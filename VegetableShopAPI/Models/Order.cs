@@ -8,10 +8,10 @@
         public decimal TotalPrice { get; set; } // Tổng tiền đơn hàng
         public string Status { get; set; } = "Pending"; // Trạng thái: Pending (Chờ xử lý), Completed (Hoàn thành)...
         public string ShippingAddress { get; set; } = string.Empty; // Địa chỉ giao hàng
-        public string RecipientName { get; set; } = string.Empty;
-        public string Phone { get; set; } = string.Empty;
-        public string Note { get; set; } = string.Empty;
-        public string PaymentMethod { get; set; } = string.Empty;
-        public decimal? ShippingFee { get; set; }
+        public string RecipientName { get; internal set; }
+        public string Phone { get; internal set; }
+        public string Note { get; internal set; }
+        public string PaymentMethod { get; internal set; }
+        public decimal? ShippingFee { get; internal set; }
     }
 }
