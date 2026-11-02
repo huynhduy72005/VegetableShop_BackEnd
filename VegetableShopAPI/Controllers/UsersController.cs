@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.ComponentModel.DataAnnotations;
 using VegetableShopAPI.Data;
 using VegetableShopAPI.Models;
 
@@ -30,6 +31,28 @@ namespace VegetableShopAPI.Controllers
             var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == loginDto.Email && u.Password == loginDto.Password);
             if (user == null) return Unauthorized(new { message = "Email hoặc mật khẩu không đúng!" });
             return Ok(new { success = true, message = "Đăng nhập thành công!", user });
+        }
+
+        [HttpPut("change-password/{id:int}")]
+        public async Task<IActionResult> ChangePassword(int id, [FromBody] ChangePasswordDto dto)
+        {
+            if (id <= 0)
+                return BadRequest(new { message = "Mã tài khoản không hợp lệ." });
+
+            var user = await _context.Users.FindAsync(id);
+            if (user == null)
+                return NotFound(new { message = "Không tìm thấy người dùng!" });
+
+            if (user.Password != dto.CurrentPassword)
+                return BadRequest(new { message = "Mật khẩu hiện tại không đúng." });
+
+            if (dto.CurrentPassword == dto.NewPassword)
+                return BadRequest(new { message = "Mật khẩu mới phải khác mật khẩu hiện tại." });
+
+            user.Password = dto.NewPassword;
+            await _context.SaveChangesAsync();
+
+            return Ok(new { success = true, message = "Đổi mật khẩu thành công!" });
         }
 
         // GET: api/users (Lấy danh sách tất cả tài khoản - Dành cho Admin)
@@ -69,7 +92,15 @@ namespace VegetableShopAPI.Controllers
             public string Role { get; set; } = string.Empty;
         }
 
+        public class ChangePasswordDto
+        {
+            [Required]
+            public string CurrentPassword { get; set; } = string.Empty;
 
+            [Required]
+            [MinLength(8)]
+            public string NewPassword { get; set; } = string.Empty;
+        }
 
     }
 }
