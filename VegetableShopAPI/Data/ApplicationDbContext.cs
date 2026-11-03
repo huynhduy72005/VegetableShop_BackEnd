@@ -9,12 +9,32 @@ namespace VegetableShopAPI.Data
 
         public DbSet<Product> Products { get; set; }
         public DbSet<User> Users { get; set; }
+        public DbSet<PasswordResetRequest> PasswordResetRequests { get; set; }
         public DbSet<Category> Categories { get; set; }
         public DbSet<Order> Orders { get; set; }
         public DbSet<OrderDetail> OrderDetails { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
+            modelBuilder.Entity<PasswordResetRequest>()
+                .Property(request => request.EncryptedPassword)
+                .HasMaxLength(2048)
+                .IsRequired();
+
+            modelBuilder.Entity<PasswordResetRequest>()
+                .Property(request => request.Status)
+                .HasMaxLength(20)
+                .IsRequired();
+
+            modelBuilder.Entity<PasswordResetRequest>()
+                .HasIndex(request => new { request.UserId, request.Status });
+
+            modelBuilder.Entity<PasswordResetRequest>()
+                .HasOne(request => request.User)
+                .WithMany()
+                .HasForeignKey(request => request.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
             modelBuilder.Entity<Product>()
                 .HasOne<Category>()
                 .WithMany()

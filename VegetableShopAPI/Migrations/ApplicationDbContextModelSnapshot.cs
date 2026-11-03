@@ -86,9 +86,9 @@ namespace VegetableShopAPI.Migrations
                     b.Property<int>("UserId")
                         .HasColumnType("int");
 
-                    b.HasIndex("UserId");
-
                     b.HasKey("Id");
+
+                    b.HasIndex("UserId");
 
                     b.ToTable("Orders");
                 });
@@ -113,13 +113,45 @@ namespace VegetableShopAPI.Migrations
                     b.Property<int>("Quantity")
                         .HasColumnType("int");
 
+                    b.HasKey("Id");
+
                     b.HasIndex("OrderId");
 
                     b.HasIndex("ProductId");
 
+                    b.ToTable("OrderDetails");
+                });
+
+            modelBuilder.Entity("VegetableShopAPI.Models.PasswordResetRequest", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("EncryptedPassword")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("nvarchar(2048)");
+
+                    b.Property<DateTime?>("ReviewedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("int");
+
                     b.HasKey("Id");
 
-                    b.ToTable("OrderDetails");
+                    b.HasIndex("UserId", "Status");
+
+                    b.ToTable("PasswordResetRequests");
                 });
 
             modelBuilder.Entity("VegetableShopAPI.Models.Product", b =>
@@ -132,8 +164,6 @@ namespace VegetableShopAPI.Migrations
 
                     b.Property<int>("CategoryId")
                         .HasColumnType("int");
-
-                    b.HasIndex("CategoryId");
 
                     b.Property<string>("Description")
                         .HasColumnType("nvarchar(max)");
@@ -157,6 +187,8 @@ namespace VegetableShopAPI.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CategoryId");
 
                     b.ToTable("Products");
                 });
@@ -214,6 +246,17 @@ namespace VegetableShopAPI.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("VegetableShopAPI.Models.PasswordResetRequest", b =>
+                {
+                    b.HasOne("VegetableShopAPI.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("VegetableShopAPI.Models.Product", b =>
                 {
                     b.HasOne("VegetableShopAPI.Models.Category", null)
@@ -222,7 +265,6 @@ namespace VegetableShopAPI.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
-
 #pragma warning restore 612, 618
         }
     }

@@ -48,14 +48,29 @@
 //app.Run();
 
 using System.Security.Claims;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Cryptography;
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using VegetableShopAPI.Data;
 using VegetableShopAPI.Services;
 
 var builder = WebApplication.CreateBuilder(args);
+
+var dataProtectionPath = builder.Configuration["DataProtection:KeysPath"];
+if (string.IsNullOrWhiteSpace(dataProtectionPath))
+{
+    dataProtectionPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "VegetableShopAPI",
+        "DataProtection-Keys");
+}
+Directory.CreateDirectory(dataProtectionPath);
+builder.Services.AddDataProtection()
+    .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionPath));
 
 var jwtKey = builder.Configuration["Jwt:Key"];
 
@@ -114,16 +129,47 @@ builder.Services
 
                 var role = context.Principal?
                     .FindFirstValue(ClaimTypes.Role);
+                var passwordFingerprint = context.Principal?
+                    .FindFirstValue("password_fingerprint");
 
                 var db = context.HttpContext.RequestServices
                     .GetRequiredService<ApplicationDbContext>();
 
                 if (!int.TryParse(id, out var userId) ||
-                    !await db.Users.AnyAsync(
-                        u => u.Id == userId && u.Role == role))
+                    string.IsNullOrEmpty(passwordFingerprint))
                 {
                     context.Fail(
                         "Tài khoản hoặc quyền đã thay đổi. Hãy đăng nhập lại.");
+                    return;
+                }
+
+                var user = await db.Users
+                    .Where(account => account.Id == userId && account.Role == role)
+                    .Select(account => account.Password)
+                    .FirstOrDefaultAsync();
+                var currentFingerprint = user == null
+                    ? Array.Empty<byte>()
+                    : HMACSHA256.HashData(
+                        Encoding.UTF8.GetBytes(jwtKey),
+                        Encoding.UTF8.GetBytes(user));
+                byte[] tokenFingerprint;
+                try
+                {
+                    tokenFingerprint = Convert.FromHexString(passwordFingerprint);
+                }
+                catch (FormatException)
+                {
+                    context.Fail("Phiên đăng nhập không hợp lệ. Hãy đăng nhập lại.");
+                    return;
+                }
+
+                if (currentFingerprint.Length == 0 ||
+                    !CryptographicOperations.FixedTimeEquals(
+                        currentFingerprint,
+                        tokenFingerprint))
+                {
+                    context.Fail(
+                        "Mật khẩu tài khoản đã thay đổi. Hãy đăng nhập lại.");
                 }
             }
         };

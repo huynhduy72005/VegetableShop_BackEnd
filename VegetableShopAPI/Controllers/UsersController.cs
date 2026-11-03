@@ -1,6 +1,13 @@
 ﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using System.ComponentModel.DataAnnotations;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
+using Microsoft.IdentityModel.Tokens;
 using VegetableShopAPI.Data;
 using VegetableShopAPI.Models;
 
@@ -11,7 +18,19 @@ namespace VegetableShopAPI.Controllers
     public class UsersController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
-        public UsersController(ApplicationDbContext context) => _context = context;
+        private readonly IDataProtector _passwordProtector;
+        private readonly IConfiguration _configuration;
+
+        public UsersController(
+            ApplicationDbContext context,
+            IDataProtectionProvider dataProtectionProvider,
+            IConfiguration configuration)
+        {
+            _context = context;
+            _passwordProtector = dataProtectionProvider.CreateProtector(
+                "VegetableShop.PasswordResetRequest.v1");
+            _configuration = configuration;
+        }
 
         [HttpPost("register")]
         public async Task<IActionResult> Register([FromBody] User user)
@@ -30,7 +49,204 @@ namespace VegetableShopAPI.Controllers
         {
             var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == loginDto.Email && u.Password == loginDto.Password);
             if (user == null) return Unauthorized(new { message = "Email hoặc mật khẩu không đúng!" });
-            return Ok(new { success = true, message = "Đăng nhập thành công!", user });
+
+            var jwtKey = _configuration["Jwt:Key"];
+            if (string.IsNullOrWhiteSpace(jwtKey))
+                throw new InvalidOperationException("Jwt:Key chưa được cấu hình.");
+
+            var credentials = new SigningCredentials(
+                new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
+                SecurityAlgorithms.HmacSha256);
+            var claims = new[]
+            {
+                new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+                new Claim(ClaimTypes.Email, user.Email),
+                new Claim(ClaimTypes.Role, user.Role),
+                new Claim("password_fingerprint", Convert.ToHexString(
+                    HMACSHA256.HashData(
+                        Encoding.UTF8.GetBytes(jwtKey),
+                        Encoding.UTF8.GetBytes(user.Password))))
+            };
+            var jwt = new JwtSecurityToken(
+                issuer: "VegetableShopAPI",
+                audience: "VegetableShopReact",
+                claims: claims,
+                expires: DateTime.UtcNow.AddHours(8),
+                signingCredentials: credentials);
+            var token = new JwtSecurityTokenHandler().WriteToken(jwt);
+
+            return Ok(new
+            {
+                success = true,
+                message = "Đăng nhập thành công!",
+                token,
+                user = new { user.Id, user.FullName, user.Email, user.Role }
+            });
+        }
+
+        [HttpPost("password-reset-eligibility")]
+        public async Task<IActionResult> CheckPasswordResetEligibility(
+            [FromBody] PasswordResetEligibilityDto dto)
+        {
+            var userRole = await _context.Users
+                .Where(user => user.Email == dto.Email.Trim())
+                .Select(user => user.Role)
+                .FirstOrDefaultAsync();
+
+            if (userRole == null)
+                return NotFound(new { message = "Không tìm thấy tài khoản với email này." });
+
+            return Ok(new { requiresAdminRecoveryKey = userRole == "Admin" });
+        }
+
+        [HttpPost("password-reset-requests")]
+        public async Task<IActionResult> CreatePasswordResetRequest(
+            [FromBody] CreatePasswordResetRequestDto dto)
+        {
+            var user = await _context.Users.FirstOrDefaultAsync(
+                account => account.Email == dto.Email.Trim());
+
+            if (user == null)
+                return Ok(new { success = true, status = "Pending" });
+
+            if (user.Role == "Admin")
+            {
+                var recoveryKey = _configuration["PasswordRecovery:AdminKey"];
+                if (string.IsNullOrEmpty(recoveryKey) ||
+                    Encoding.UTF8.GetByteCount(recoveryKey) < 32)
+                {
+                    return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+                    {
+                        message = "Mã khôi phục admin chưa được cấu hình an toàn trong backend."
+                    });
+                }
+
+                if (!FixedTimeEquals(dto.AdminRecoveryKey, recoveryKey))
+                {
+                    return Unauthorized(new
+                    {
+                        message = "Mã khôi phục admin không hợp lệ hoặc chưa được cấu hình."
+                    });
+                }
+
+                user.Password = dto.NewPassword;
+                await _context.SaveChangesAsync();
+                return Ok(new
+                {
+                    success = true,
+                    status = "Approved",
+                    message = "Mật khẩu admin đã được cập nhật."
+                });
+            }
+
+            var existingRequest = await _context.PasswordResetRequests
+                .Where(request => request.UserId == user.Id && request.Status == "Pending")
+                .OrderByDescending(request => request.CreatedAtUtc)
+                .FirstOrDefaultAsync();
+            if (existingRequest != null)
+            {
+                return Ok(new
+                {
+                    success = true,
+                    status = existingRequest.Status,
+                    requestId = existingRequest.Id
+                });
+            }
+
+            var request = new PasswordResetRequest
+            {
+                Id = Guid.NewGuid(),
+                UserId = user.Id,
+                EncryptedPassword = _passwordProtector.Protect(dto.NewPassword),
+                Status = "Pending",
+                CreatedAtUtc = DateTime.UtcNow
+            };
+            _context.PasswordResetRequests.Add(request);
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                success = true,
+                status = request.Status,
+                requestId = request.Id
+            });
+        }
+
+        [HttpGet("password-reset-requests/{id:guid}/status")]
+        public async Task<IActionResult> GetPasswordResetRequestStatus(Guid id)
+        {
+            var status = await _context.PasswordResetRequests
+                .Where(request => request.Id == id)
+                .Select(request => request.Status)
+                .FirstOrDefaultAsync();
+
+            return status == null
+                ? NotFound(new { message = "Không tìm thấy yêu cầu." })
+                : Ok(new { status });
+        }
+
+        [Authorize(Roles = "Admin")]
+        [HttpGet("password-reset-requests")]
+        public async Task<IActionResult> GetPasswordResetRequests()
+        {
+            var requests = await _context.PasswordResetRequests
+                .Where(request => request.Status == "Pending")
+                .OrderBy(request => request.CreatedAtUtc)
+                .Select(request => new
+                {
+                    request.Id,
+                    request.UserId,
+                    request.User.FullName,
+                    request.User.Email,
+                    request.CreatedAtUtc,
+                    request.Status
+                })
+                .ToListAsync();
+
+            return Ok(requests);
+        }
+
+        [Authorize(Roles = "Admin")]
+        [HttpPost("password-reset-requests/{id:guid}/approve")]
+        public async Task<IActionResult> ApprovePasswordResetRequest(Guid id)
+        {
+            await using var transaction = await _context.Database.BeginTransactionAsync(
+                System.Data.IsolationLevel.Serializable);
+            var request = await _context.PasswordResetRequests
+                .Include(item => item.User)
+                .FirstOrDefaultAsync(item => item.Id == id && item.Status == "Pending");
+
+            if (request == null)
+                return NotFound(new { message = "Yêu cầu không tồn tại hoặc đã được xử lý." });
+
+            request.User.Password = _passwordProtector.Unprotect(request.EncryptedPassword);
+            request.EncryptedPassword = string.Empty;
+            request.Status = "Approved";
+            request.ReviewedAtUtc = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            return Ok(new { success = true, message = "Đã chấp nhận yêu cầu đổi mật khẩu." });
+        }
+
+        [Authorize(Roles = "Admin")]
+        [HttpPost("password-reset-requests/{id:guid}/reject")]
+        public async Task<IActionResult> RejectPasswordResetRequest(Guid id)
+        {
+            await using var transaction = await _context.Database.BeginTransactionAsync(
+                System.Data.IsolationLevel.Serializable);
+            var request = await _context.PasswordResetRequests
+                .FirstOrDefaultAsync(item => item.Id == id && item.Status == "Pending");
+            if (request == null)
+                return NotFound(new { message = "Yêu cầu không tồn tại hoặc đã được xử lý." });
+
+            request.EncryptedPassword = string.Empty;
+            request.Status = "Rejected";
+            request.ReviewedAtUtc = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            return Ok(new { success = true, message = "Đã từ chối yêu cầu đổi mật khẩu." });
         }
 
         [HttpPut("change-password/{id:int}")]
@@ -56,13 +272,24 @@ namespace VegetableShopAPI.Controllers
         }
 
         // GET: api/users (Lấy danh sách tất cả tài khoản - Dành cho Admin)
+        [Authorize(Roles = "Admin")]
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<User>>> GetAllUsers()
+        public async Task<IActionResult> GetAllUsers()
         {
-            return await _context.Users.ToListAsync();
+            var users = await _context.Users
+                .Select(user => new
+                {
+                    user.Id,
+                    user.FullName,
+                    user.Email,
+                    user.Role
+                })
+                .ToListAsync();
+            return Ok(users);
         }
 
         // PUT: api/users/5/role (Cập nhật quyền của tài khoản)
+        [Authorize(Roles = "Admin")]
         [HttpPut("{id}/role")]
         public async Task<IActionResult> UpdateUserRole(int id, [FromBody] RoleUpdateDto dto)
         {
@@ -75,6 +302,7 @@ namespace VegetableShopAPI.Controllers
         }
 
         // DELETE: api/users/5 (Xóa tài khoản)
+        [Authorize(Roles = "Admin")]
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteUser(int id)
         {
@@ -100,6 +328,34 @@ namespace VegetableShopAPI.Controllers
             [Required]
             [MinLength(8)]
             public string NewPassword { get; set; } = string.Empty;
+        }
+
+        public class CreatePasswordResetRequestDto
+        {
+            [Required]
+            [EmailAddress]
+            public string Email { get; set; } = string.Empty;
+
+            [Required]
+            [MinLength(8)]
+            public string NewPassword { get; set; } = string.Empty;
+
+            public string AdminRecoveryKey { get; set; } = string.Empty;
+        }
+
+        public class PasswordResetEligibilityDto
+        {
+            [Required]
+            [EmailAddress]
+            public string Email { get; set; } = string.Empty;
+        }
+
+        private static bool FixedTimeEquals(string submittedKey, string configuredKey)
+        {
+            var submittedBytes = Encoding.UTF8.GetBytes(submittedKey ?? string.Empty);
+            var configuredBytes = Encoding.UTF8.GetBytes(configuredKey);
+            return submittedBytes.Length == configuredBytes.Length &&
+                CryptographicOperations.FixedTimeEquals(submittedBytes, configuredBytes);
         }
 
     }
