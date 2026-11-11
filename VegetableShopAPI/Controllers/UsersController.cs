@@ -7,6 +7,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using Microsoft.IdentityModel.Tokens;
 using VegetableShopAPI.Data;
 using VegetableShopAPI.Models;
@@ -80,7 +81,7 @@ namespace VegetableShopAPI.Controllers
                 success = true,
                 message = "Đăng nhập thành công!",
                 token,
-                user = new { user.Id, user.FullName, user.Email, user.Role }
+                user = new { user.Id, user.FullName, user.Email, user.Phone, user.Gender, user.DateOfBirth, user.Role }
             });
         }
 
@@ -271,6 +272,50 @@ namespace VegetableShopAPI.Controllers
             return Ok(new { success = true, message = "Đổi mật khẩu thành công!" });
         }
 
+        [Authorize]
+        [HttpPut("profile/{id:int}")]
+        public async Task<IActionResult> UpdateProfile(int id, [FromBody] UpdateProfileDto dto)
+        {
+            if (!int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var authenticatedUserId) ||
+                authenticatedUserId != id)
+            {
+                return Forbid();
+            }
+
+            var user = await _context.Users.FindAsync(id);
+            if (user == null)
+                return NotFound(new { message = "Không tìm thấy người dùng!" });
+
+            var email = dto.Email.Trim();
+            if (await _context.Users.AnyAsync(account => account.Id != id && account.Email == email))
+                return Conflict(new { message = "Email này đã được tài khoản khác sử dụng." });
+
+            var phone = Regex.Replace(dto.Phone.Trim(), @"[\s().-]", string.Empty);
+            if (!Regex.IsMatch(phone, @"^(?:0(?:3|5|7|8|9)\d{8}|02\d{8,9}|\+84(?:3|5|7|8|9)\d{8}|\+842\d{8,9})$"))
+                return BadRequest(new { message = "Số điện thoại Việt Nam không hợp lệ." });
+
+            var allowedGenders = new[] { "Nam", "Nữ", "Khác", "Không muốn tiết lộ" };
+            if (!allowedGenders.Contains(dto.Gender))
+                return BadRequest(new { message = "Vui lòng chọn giới tính hợp lệ." });
+
+            if (dto.DateOfBirth > DateOnly.FromDateTime(DateTime.UtcNow))
+                return BadRequest(new { message = "Ngày sinh không thể ở tương lai." });
+
+            user.FullName = dto.FullName.Trim();
+            user.Email = email;
+            user.Phone = dto.Phone.Trim();
+            user.Gender = dto.Gender;
+            user.DateOfBirth = dto.DateOfBirth;
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                success = true,
+                message = "Cập nhật thông tin cá nhân thành công!",
+                user = new { user.Id, user.FullName, user.Email, user.Phone, user.Gender, user.DateOfBirth, user.Role }
+            });
+        }
+
         // GET: api/users (Lấy danh sách tất cả tài khoản - Dành cho Admin)
         [Authorize(Roles = "Admin")]
         [HttpGet]
@@ -328,6 +373,27 @@ namespace VegetableShopAPI.Controllers
             [Required]
             [MinLength(8)]
             public string NewPassword { get; set; } = string.Empty;
+        }
+
+        public class UpdateProfileDto
+        {
+            [Required]
+            [StringLength(100)]
+            public string FullName { get; set; } = string.Empty;
+
+            [Required]
+            [StringLength(254)]
+            [EmailAddress]
+            public string Email { get; set; } = string.Empty;
+
+            [Required]
+            [StringLength(20)]
+            public string Phone { get; set; } = string.Empty;
+
+            [Required]
+            public string Gender { get; set; } = string.Empty;
+
+            public DateOnly? DateOfBirth { get; set; }
         }
 
         public class CreatePasswordResetRequestDto
