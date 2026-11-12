@@ -176,6 +176,7 @@ builder.Services
     });
 
 builder.Services.AddAuthorization();
+builder.Services.AddScoped<IEmailService, EmailService>();
 
 var app = builder.Build();
 

@@ -1,4 +1,6 @@
-﻿namespace VegetableShopAPI.Models
+﻿using System.ComponentModel.DataAnnotations.Schema;
+
+namespace VegetableShopAPI.Models
 {
     public class Order
     {
@@ -13,5 +15,8 @@
         public string Note { get; internal set; }
         public string PaymentMethod { get; internal set; }
         public decimal? ShippingFee { get; internal set; }
+
+        [NotMapped]
+        public string? Email { get; set; }
     }
 }
