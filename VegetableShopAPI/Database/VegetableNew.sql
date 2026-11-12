@@ -6,6 +6,92 @@ GO
 USE [VegetableShopDb];
 GO
 
+-- ==========================================
+-- QUAN LY NHAN VIEN - EMPLOYEE MANAGEMENT
+-- ==========================================
+-- Yeu cau: Bang dbo.Users phai ton tai truoc.
+-- Chi tao bang neu chua ton tai.
+-- Khong xoa du lieu hien co.
+
+IF OBJECT_ID(N'dbo.Users', N'U') IS NULL
+BEGIN
+    THROW 50001, 'Bang dbo.Users chua ton tai. Hay tao database goc truoc.', 1;
+END
+GO
+
+-- 1. Bang Employees
+
+IF OBJECT_ID(N'dbo.Employees', N'U') IS NULL
+BEGIN
+    CREATE TABLE [dbo].[Employees] (
+        [Id] INT IDENTITY(1,1) NOT NULL,
+        [EmployeeCode] NVARCHAR(20) NOT NULL,
+        [FullName] NVARCHAR(150) NOT NULL,
+        [Email] NVARCHAR(255) NOT NULL,
+        [Phone] NVARCHAR(20) NOT NULL,
+        [Position] NVARCHAR(100) NOT NULL,
+        [Status] NVARCHAR(20) NOT NULL
+            DEFAULT ('Active'),
+        [UserId] INT NULL,
+        [CanManageProducts] BIT NOT NULL
+            DEFAULT (0),
+        [CanManageOrders] BIT NOT NULL
+            DEFAULT (0),
+        [CanManageInventory] BIT NOT NULL
+            DEFAULT (0),
+        [CreatedAt] DATETIME2(7) NOT NULL
+            DEFAULT (SYSUTCDATETIME()),
+
+        CONSTRAINT [PK_Employees]
+            PRIMARY KEY ([Id]),
+
+        CONSTRAINT [UQ_Employees_EmployeeCode]
+            UNIQUE ([EmployeeCode]),
+
+        CONSTRAINT [UQ_Employees_Email]
+            UNIQUE ([Email]),
+
+        CONSTRAINT [UQ_Employees_UserId]
+            UNIQUE ([UserId]),
+
+        CONSTRAINT [FK_Employees_Users]
+            FOREIGN KEY ([UserId])
+            REFERENCES [dbo].[Users] ([Id])
+    );
+END
+GO
+
+-- 2. Bang EmployeeActivityLogs
+
+IF OBJECT_ID(N'dbo.EmployeeActivityLogs', N'U') IS NULL
+BEGIN
+    CREATE TABLE [dbo].[EmployeeActivityLogs] (
+        [Id] BIGINT IDENTITY(1,1) NOT NULL,
+        [EmployeeId] INT NULL,
+        [ActorUserId] INT NULL,
+        [Action] NVARCHAR(100) NOT NULL,
+        [Details] NVARCHAR(1000) NULL,
+        [CreatedAt] DATETIME2(7) NOT NULL
+            DEFAULT (SYSUTCDATETIME()),
+
+        CONSTRAINT [PK_EmployeeActivityLogs]
+            PRIMARY KEY ([Id]),
+
+        CONSTRAINT [FK_EmployeeActivityLogs_Employees]
+            FOREIGN KEY ([EmployeeId])
+            REFERENCES [dbo].[Employees] ([Id]),
+
+        CONSTRAINT [FK_EmployeeActivityLogs_Users]
+            FOREIGN KEY ([ActorUserId])
+            REFERENCES [dbo].[Users] ([Id])
+    );
+END
+GO
+
+-- ==========================================
+-- KET THUC PHAN QUAN LY NHAN VIEN
+-- ==========================================
+
 -- 1. THÊM DỮ LIỆU BẢNG CATEGORIES (Danh mục rau củ quả)
 INSERT INTO dbo.Categories (Name, Description)
 SELECT seed.Name, seed.Description
