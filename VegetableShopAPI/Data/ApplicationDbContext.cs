@@ -41,6 +41,10 @@ namespace VegetableShopAPI.Data
                 .HasForeignKey(product => product.CategoryId)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            modelBuilder.Entity<Product>()
+                .Property(product => product.IsVisible)
+                .HasDefaultValue(true);
+
             modelBuilder.Entity<Order>()
                 .HasOne<User>()
                 .WithMany()
