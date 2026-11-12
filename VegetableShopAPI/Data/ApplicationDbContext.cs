@@ -14,7 +14,8 @@ namespace VegetableShopAPI.Data
         public DbSet<Order> Orders { get; set; }
         public DbSet<OrderDetail> OrderDetails { get; set; }
         public DbSet<PasswordResetRequest> PasswordResetRequests { get; set; }
-
+        public DbSet<Employee> Employees { get; set; }
+        public DbSet<EmployeeActivityLog> EmployeeActivityLogs { get; set; }
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             modelBuilder.Entity<Product>()
@@ -44,6 +45,51 @@ namespace VegetableShopAPI.Data
                 .WithMany()
                 .HasForeignKey(detail => detail.ProductId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<Employee>(entity =>
+            {
+                entity.ToTable("Employees");
+
+                entity.HasIndex(e => e.EmployeeCode).IsUnique();
+                entity.HasIndex(e => e.Email).IsUnique();
+                entity.HasIndex(e => e.UserId).IsUnique();
+
+                entity.Property(e => e.CreatedAt)
+                    .HasDefaultValueSql("SYSUTCDATETIME()");
+
+                entity.HasOne<User>()
+                    .WithOne()
+                    .HasForeignKey<Employee>(e => e.UserId)
+                    .OnDelete(DeleteBehavior.NoAction);
+            });
+
+            modelBuilder.Entity<EmployeeActivityLog>(entity =>
+            {
+                entity.ToTable("EmployeeActivityLogs");
+
+                entity.HasIndex(e => e.CreatedAt);
+
+                entity.Property(e => e.Action)
+                    .HasMaxLength(100);
+
+                entity.Property(e => e.Details)
+                    .HasMaxLength(1000);
+
+                entity.Property(e => e.CreatedAt)
+                    .HasDefaultValueSql("SYSUTCDATETIME()");
+
+                entity.HasOne<Employee>()
+                    .WithMany()
+                    .HasForeignKey(e => e.EmployeeId)
+                    .OnDelete(DeleteBehavior.NoAction);
+
+                entity.HasOne<User>()
+                    .WithMany()
+                    .HasForeignKey(e => e.ActorUserId)
+                    .OnDelete(DeleteBehavior.NoAction);
+            });
+
+       
         }
     }
 }
