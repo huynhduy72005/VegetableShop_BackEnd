@@ -51,13 +51,34 @@ BEGIN
         CONSTRAINT [UQ_Employees_Email]
             UNIQUE ([Email]),
 
-        CONSTRAINT [UQ_Employees_UserId]
-            UNIQUE ([UserId]),
-
         CONSTRAINT [FK_Employees_Users]
             FOREIGN KEY ([UserId])
             REFERENCES [dbo].[Users] ([Id])
     );
+END
+GO
+
+-- Mỗi tài khoản chỉ liên kết tối đa một hồ sơ; nhiều hồ sơ vẫn có thể chưa có tài khoản.
+IF EXISTS (
+    SELECT 1
+    FROM sys.key_constraints
+    WHERE [name] = N'UQ_Employees_UserId'
+      AND [parent_object_id] = OBJECT_ID(N'dbo.Employees'))
+BEGIN
+    ALTER TABLE [dbo].[Employees]
+        DROP CONSTRAINT [UQ_Employees_UserId];
+END
+GO
+
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE [object_id] = OBJECT_ID(N'dbo.Employees')
+      AND [name] = N'IX_Employees_UserId')
+BEGIN
+    CREATE UNIQUE INDEX [IX_Employees_UserId]
+        ON [dbo].[Employees] ([UserId])
+        WHERE [UserId] IS NOT NULL;
 END
 GO
 

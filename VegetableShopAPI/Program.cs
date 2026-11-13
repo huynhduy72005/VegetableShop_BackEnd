@@ -53,9 +53,11 @@ using System.Security.Cryptography;
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using VegetableShopAPI.Data;
+using VegetableShopAPI.Models;
 using VegetableShopAPI.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -91,6 +93,10 @@ builder.Services.AddSwaggerGen();
 builder.Services.AddHttpClient();
 
 builder.Services.AddScoped<IEmailService, EmailService>();
+builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
+builder.Services.AddScoped<AccountCredentialService>();
+builder.Services.AddScoped<EmployeeCodeService>();
+builder.Services.AddScoped<EmployeePermissionService>();
 
 builder.Services.AddCors(options =>
 {
@@ -145,13 +151,17 @@ builder.Services
 
                 var user = await db.Users
                     .Where(account => account.Id == userId && account.Role == role)
-                    .Select(account => account.Password)
+                    .Select(account => new
+                    {
+                        account.PasswordHash,
+                        account.IsActive
+                    })
                     .FirstOrDefaultAsync();
-                var currentFingerprint = user == null
+                var currentFingerprint = user == null || !user.IsActive
                     ? Array.Empty<byte>()
                     : HMACSHA256.HashData(
                         Encoding.UTF8.GetBytes(jwtKey),
-                        Encoding.UTF8.GetBytes(user));
+                        Encoding.UTF8.GetBytes(user.PasswordHash));
                 byte[] tokenFingerprint;
                 try
                 {
@@ -170,6 +180,16 @@ builder.Services
                 {
                     context.Fail(
                         "Mật khẩu tài khoản đã thay đổi. Hãy đăng nhập lại.");
+                }
+
+                var employeeIsInactive = await db.Employees
+                    .AnyAsync(employee =>
+                        employee.UserId == userId &&
+                        employee.Status != "Active");
+                if (employeeIsInactive)
+                {
+                    context.Fail(
+                        "Tài khoản nhân viên đã bị vô hiệu hóa.");
                 }
             }
         };
@@ -191,6 +211,29 @@ app.UseCors("AllowReactApp");
 app.UseStaticFiles();
 
 app.UseAuthentication();
+app.Use(async (context, next) =>
+{
+    var requiresPasswordChange = context.User.HasClaim(
+        "must_change_password",
+        "true");
+    var isChangePasswordRequest =
+        context.Request.Path.Value?.StartsWith(
+            "/api/users/change-password/",
+            StringComparison.OrdinalIgnoreCase) == true;
+
+    if (requiresPasswordChange && !isChangePasswordRequest)
+    {
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        await context.Response.WriteAsJsonAsync(new
+        {
+            code = "PASSWORD_CHANGE_REQUIRED",
+            message = "Bạn cần đổi mật khẩu trước khi sử dụng hệ thống."
+        });
+        return;
+    }
+
+    await next();
+});
 app.UseAuthorization();
 
 app.MapControllers();

@@ -1,6 +1,5 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using VegetableShopAPI.Models;
-using Microsoft.EntityFrameworkCore;
 
 namespace VegetableShopAPI.Data
 {
@@ -18,6 +17,29 @@ namespace VegetableShopAPI.Data
         public DbSet<EmployeeActivityLog> EmployeeActivityLogs { get; set; }
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
+            modelBuilder.Entity<User>(entity =>
+            {
+                entity.Property(user => user.Username)
+                    .HasMaxLength(100)
+                    .IsRequired();
+
+                entity.HasIndex(user => user.Username)
+                    .IsUnique();
+
+                entity.Property(user => user.IsActive)
+                    .HasDefaultValue(true);
+
+                entity.Property(user => user.MustChangePassword)
+                    .HasDefaultValue(false);
+
+                entity.Property(user => user.PasswordHash)
+                    .IsRequired();
+            });
+
+            modelBuilder.Entity<PasswordResetRequest>()
+                .Property(request => request.NewPasswordHash)
+                .HasMaxLength(500);
+
             modelBuilder.Entity<Product>()
                 .HasOne<Category>()
                 .WithMany()

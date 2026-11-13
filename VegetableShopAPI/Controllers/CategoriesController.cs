@@ -1,7 +1,9 @@
 ﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using VegetableShopAPI.Data;
 using VegetableShopAPI.Models;
+using VegetableShopAPI.Services;
 
 namespace VegetableShopAPI.Controllers
 {
@@ -10,7 +12,15 @@ namespace VegetableShopAPI.Controllers
     public class CategoriesController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
-        public CategoriesController(ApplicationDbContext context) => _context = context;
+        private readonly EmployeePermissionService _permissions;
+
+        public CategoriesController(
+            ApplicationDbContext context,
+            EmployeePermissionService permissions)
+        {
+            _context = context;
+            _permissions = permissions;
+        }
 
         [HttpGet]
         public async Task<ActionResult<IEnumerable<Category>>> GetCategories() => await _context.Categories.ToListAsync();
@@ -19,8 +29,12 @@ namespace VegetableShopAPI.Controllers
 
         // THÊM DANH MỤC MỚI
         [HttpPost]
+        [Authorize]
         public async Task<ActionResult<Category>> PostCategory(Category category)
         {
+            if (!await _permissions.CanManageProductsAsync(User))
+                return Forbid();
+
             _context.Categories.Add(category);
             await _context.SaveChangesAsync();
 
@@ -33,8 +47,12 @@ namespace VegetableShopAPI.Controllers
 
         // SỬA DANH MỤC
         [HttpPut("{id}")]
+        [Authorize]
         public async Task<IActionResult> PutCategory(int id, Category category)
         {
+            if (!await _permissions.CanManageProductsAsync(User))
+                return Forbid();
+
             if (id != category.Id)
             {
                 return BadRequest();
@@ -63,8 +81,12 @@ namespace VegetableShopAPI.Controllers
 
         // XÓA DANH MỤC
         [HttpDelete("{id}")]
+        [Authorize]
         public async Task<IActionResult> DeleteCategory(int id)
         {
+            if (!await _permissions.CanManageProductsAsync(User))
+                return Forbid();
+
             var category = await _context.Categories.FindAsync(id);
             if (category == null)
             {

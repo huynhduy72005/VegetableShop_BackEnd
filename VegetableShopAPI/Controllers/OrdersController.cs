@@ -1,5 +1,7 @@
 ﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 using System.Net;
 using System.Net.Mail;
 using System.Text;
@@ -17,6 +19,7 @@ namespace VegetableShopAPI.Controllers
         private readonly IEmailService _emailService;
         private readonly ILogger<OrdersController> _logger;
         private readonly IConfiguration _configuration;
+        private readonly EmployeePermissionService _permissions;
         private static readonly string[] AllowedOrderStatuses =
         {
             "Pending",
@@ -30,12 +33,14 @@ namespace VegetableShopAPI.Controllers
             ApplicationDbContext context,
             IEmailService emailService,
             ILogger<OrdersController> logger,
-            IConfiguration configuration)
+            IConfiguration configuration,
+            EmployeePermissionService permissions)
         {
             _context = context;
             _emailService = emailService;
             _logger = logger;
             _configuration = configuration;
+            _permissions = permissions;
         }
 
         // POST: api/orders (Tạo đơn hàng mới từ giỏ hàng)
@@ -102,8 +107,12 @@ namespace VegetableShopAPI.Controllers
 
         // GET: api/orders/revenue (Thống kê doanh thu)
         [HttpGet("revenue")]
+        [Authorize]
         public async Task<IActionResult> GetRevenueStatistics()
         {
+            if (!await _permissions.CanManageOrdersAsync(User))
+                return Forbid();
+
             var totalRevenue = await _context.Orders.SumAsync(o => o.TotalPrice);
             var totalOrders = await _context.Orders.CountAsync();
             var pendingOrders = await _context.Orders.CountAsync(o => o.Status == "Pending");
@@ -118,8 +127,23 @@ namespace VegetableShopAPI.Controllers
 
         // GET: api/orders  (có thể lọc theo khách: api/orders?userId=5)
         [HttpGet]
+        [Authorize]
         public async Task<IActionResult> GetOrders([FromQuery] int? userId)
         {
+            var canManageOrders = await _permissions.CanManageOrdersAsync(User);
+            if (!canManageOrders)
+            {
+                if (!int.TryParse(
+                    User.FindFirstValue(ClaimTypes.NameIdentifier),
+                    out var currentUserId))
+                    return Unauthorized();
+
+                if (userId.HasValue && userId.Value != currentUserId)
+                    return Forbid();
+
+                userId = currentUserId;
+            }
+
             var query = _context.Orders.AsNoTracking().AsQueryable();
             if (userId.HasValue)
                 query = query.Where(o => o.UserId == userId.Value);
@@ -163,10 +187,18 @@ namespace VegetableShopAPI.Controllers
 
         // GET: api/orders/5  (chi tiết một đơn hàng)
         [HttpGet("{id:int}")]
+        [Authorize]
         public async Task<IActionResult> GetOrder(int id)
         {
             var order = await _context.Orders.AsNoTracking().FirstOrDefaultAsync(o => o.Id == id);
             if (order == null)
+                return NotFound(new { message = "Không tìm thấy đơn hàng!" });
+
+            if (!await _permissions.CanManageOrdersAsync(User) &&
+                (!int.TryParse(
+                    User.FindFirstValue(ClaimTypes.NameIdentifier),
+                    out var currentUserId) ||
+                 order.UserId != currentUserId))
                 return NotFound(new { message = "Không tìm thấy đơn hàng!" });
 
             var customer = await _context.Users.AsNoTracking()
@@ -243,8 +275,12 @@ namespace VegetableShopAPI.Controllers
 
         // PUT: api/orders/5/status
         [HttpPut("{id:int}/status")]
+        [Authorize]
         public async Task<IActionResult> UpdateOrderStatus(int id, [FromBody] UpdateOrderStatusDto request)
         {
+            if (!await _permissions.CanManageOrdersAsync(User))
+                return Forbid();
+
             if (string.IsNullOrWhiteSpace(request.Status))
                 return BadRequest(new { message = "Trạng thái đơn hàng không được để trống." });
 
@@ -265,8 +301,17 @@ namespace VegetableShopAPI.Controllers
 
         // PUT: api/orders/5/cancel?userId=1
         [HttpPut("{id:int}/cancel")]
+        [Authorize]
         public async Task<IActionResult> CancelOrder(int id, [FromQuery] int userId)
         {
+            if (!int.TryParse(
+                User.FindFirstValue(ClaimTypes.NameIdentifier),
+                out var currentUserId))
+                return Unauthorized();
+
+            if (userId != currentUserId)
+                return Forbid();
+
             var order = await _context.Orders.FirstOrDefaultAsync(
                 item => item.Id == id && item.UserId == userId);
             if (order == null)
