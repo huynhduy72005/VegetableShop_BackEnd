@@ -110,6 +110,67 @@ END
 GO
 
 -- ==========================================
+-- CAP NHAT RANG BUOC EMPLOYEES.USERID
+-- Cho phep nhieu nhan vien chua co tai khoan
+-- Chi su dung UNIQUE cho UserId khac NULL
+-- ==========================================
+
+IF OBJECT_ID(N'dbo.Employees', N'U') IS NOT NULL
+   AND COL_LENGTH(N'dbo.Employees', N'UserId') IS NOT NULL
+BEGIN
+    DECLARE @OldConstraint sysname;
+    DECLARE @SqlCommand nvarchar(max);
+
+    -- Tim UNIQUE constraint cu chi ap dung tren UserId
+    SELECT TOP (1)
+        @OldConstraint = kc.name
+    FROM sys.key_constraints AS kc
+    JOIN sys.index_columns AS ic
+        ON ic.object_id = kc.parent_object_id
+       AND ic.index_id = kc.unique_index_id
+    JOIN sys.columns AS c
+        ON c.object_id = ic.object_id
+       AND c.column_id = ic.column_id
+    WHERE kc.parent_object_id = OBJECT_ID(N'dbo.Employees')
+      AND kc.type = 'UQ'
+      AND c.name = N'UserId'
+      AND ic.key_ordinal = 1
+      AND (
+          SELECT COUNT(*)
+          FROM sys.index_columns AS ic2
+          WHERE ic2.object_id = kc.parent_object_id
+            AND ic2.index_id = kc.unique_index_id
+            AND ic2.key_ordinal > 0
+      ) = 1;
+
+    -- Tao index moi neu chua ton tai
+    IF NOT EXISTS (
+        SELECT 1
+        FROM sys.indexes
+        WHERE object_id = OBJECT_ID(N'dbo.Employees')
+          AND name = N'IX_Employees_UserId'
+    )
+    BEGIN
+        EXEC(N'
+            CREATE UNIQUE INDEX IX_Employees_UserId
+            ON dbo.Employees(UserId)
+            WHERE UserId IS NOT NULL;
+        ');
+    END;
+
+    -- Xoa UNIQUE constraint cu neu co
+    IF @OldConstraint IS NOT NULL
+    BEGIN
+        SET @SqlCommand =
+            N'ALTER TABLE dbo.Employees DROP CONSTRAINT '
+            + QUOTENAME(@OldConstraint);
+
+        EXEC sys.sp_executesql @SqlCommand;
+    END;
+END;
+GO
+
+-- ==========================================
 -- KET THUC PHAN QUAN LY NHAN VIEN
 -- ==========================================
 
