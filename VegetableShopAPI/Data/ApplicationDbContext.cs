@@ -15,6 +15,13 @@ namespace VegetableShopAPI.Data
         public DbSet<PasswordResetRequest> PasswordResetRequests { get; set; }
         public DbSet<Employee> Employees { get; set; }
         public DbSet<EmployeeActivityLog> EmployeeActivityLogs { get; set; }
+
+        public DbSet<Voucher> Vouchers { get; set; }
+        public DbSet<UserVoucher> UserVouchers { get; set; }
+        public object Promotions { get; internal set; }
+
+
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             modelBuilder.Entity<User>(entity =>

@@ -18,5 +18,7 @@ namespace VegetableShopAPI.Models
 
         [NotMapped]
         public string? Email { get; set; }
+        public string? VoucherCode { get; set; }
+        public decimal? DiscountAmount { get; set; }
     }
 }
