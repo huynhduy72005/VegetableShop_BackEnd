@@ -115,6 +115,37 @@ namespace VegetableShopAPI.Controllers
             return Ok(list);
         }
 
+        [AllowAnonymous]
+        [HttpGet("public")]
+        public async Task<IActionResult> GetPublicVouchers()
+        {
+            var now = DateTime.UtcNow;
+            var vouchers = await _context.Vouchers
+                .AsNoTracking()
+                .Where(v => v.IsActive
+                    && !v.IsPersonal
+                    && v.StartDate <= now
+                    && v.EndDate >= now
+                    && v.UsedCount < v.UsageLimit)
+                .OrderBy(v => v.MinOrderValue)
+                .ThenBy(v => v.EndDate)
+                .Select(v => new
+                {
+                    v.Id,
+                    v.Code,
+                    v.Title,
+                    v.Description,
+                    v.DiscountType,
+                    v.DiscountValue,
+                    v.MaxDiscountAmount,
+                    v.MinOrderValue,
+                    v.EndDate
+                })
+                .ToListAsync();
+
+            return Ok(vouchers);
+        }
+
         // POST: api/vouchers
         [Authorize(Roles = "Admin")]
         [HttpPost]
