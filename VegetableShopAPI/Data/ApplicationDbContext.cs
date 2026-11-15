@@ -19,8 +19,7 @@ namespace VegetableShopAPI.Data
         public DbSet<Voucher> Vouchers { get; set; }
         public DbSet<UserVoucher> UserVouchers { get; set; }
         public object Promotions { get; internal set; }
-
-
+        public DbSet<ProductVariant> ProductVariants { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -118,7 +117,16 @@ namespace VegetableShopAPI.Data
                     .OnDelete(DeleteBehavior.NoAction);
             });
 
-       
+
+            modelBuilder.Entity<ProductVariant>().ToTable("ProductVariants");
+
+            modelBuilder.Entity<Product>()
+                .HasMany(p => p.Variants)
+                .WithOne(v => v.Product)
+                .HasForeignKey(v => v.ProductId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+
         }
     }
 }

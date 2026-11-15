@@ -116,23 +116,45 @@ namespace VegetableShopAPI.Controllers
             if (!await _permissions.CanManageProductsAsync(User))
                 return Forbid();
 
-            var product = await _context.Products.FindAsync(id);
+            var product = await _context.Products
+                .Include(p => p.Variants)
+                .FirstOrDefaultAsync(p => p.Id == id);
+
             if (product == null)
             {
                 return NotFound(new { message = "Không tìm thấy sản phẩm!" });
             }
 
-            _context.Products.Remove(product);
-            await _context.SaveChangesAsync();
+            // Kiểm tra xem sản phẩm đã có trong đơn hàng nào chưa
+            bool hasOrders = await _context.OrderDetails.AnyAsync(od => od.ProductId == id);
+            if (hasOrders)
+            {
+                return BadRequest(new
+                {
+                    message = "Không thể xóa vì sản phẩm này đã phát sinh đơn hàng. Hãy bấm nút Ẩn (biểu tượng con mắt) để ngừng bán!"
+                });
+            }
 
-            return Ok(new { success = true, message = "Xóa sản phẩm thành công!" });
+            try
+            {
+                _context.Products.Remove(product);
+                await _context.SaveChangesAsync();
+                return Ok(new { success = true, message = "Xóa sản phẩm thành công!" });
+            }
+            catch (DbUpdateException)
+            {
+                return BadRequest(new
+                {
+                    message = "Không thể xóa sản phẩm do đang được tham chiếu ở dữ liệu khác."
+                });
+            }
         }
-    }
 
-    public sealed class InventoryUpdateDto
-    {
-        [Required]
-        [Range(0, int.MaxValue)]
-        public int? Quantity { get; set; }
+        public sealed class InventoryUpdateDto
+        {
+            [Required]
+            [Range(0, int.MaxValue)]
+            public int? Quantity { get; set; }
+        }
     }
 }
