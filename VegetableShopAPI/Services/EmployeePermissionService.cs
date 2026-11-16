@@ -26,7 +26,7 @@ public sealed class EmployeePermissionService
         ClaimsPrincipal user,
         EmployeePermission permission)
     {
-        if (user.IsInRole("Admin"))
+        if (user.IsInRole("Admin") || user.IsInRole("AdminVIP"))
             return true;
 
         if (!int.TryParse(user.FindFirstValue(ClaimTypes.NameIdentifier), out var userId))

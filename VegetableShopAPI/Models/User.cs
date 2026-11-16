@@ -8,6 +8,7 @@
         public string Email { get; set; } = string.Empty;
         public string PasswordHash { get; set; } = string.Empty;
         public string Role { get; set; } = "Customer";
+        public bool IsVipAdmin { get; set; }
         public bool IsActive { get; set; } = true;
         public bool MustChangePassword { get; set; }
         public string? Phone { get; set; }

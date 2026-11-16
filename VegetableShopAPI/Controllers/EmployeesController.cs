@@ -13,7 +13,7 @@ namespace VegetableShopAPI.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize(Roles = "Admin")]
+[Authorize(Roles = "Admin,AdminVIP")]
 public class EmployeesController : ControllerBase
 {
     private readonly ApplicationDbContext _db;
@@ -35,6 +35,15 @@ public class EmployeesController : ControllerBase
             User.FindFirstValue(ClaimTypes.NameIdentifier),
             out var id
         ) ? id : null;
+
+    private Task<bool> IsCurrentUserVipAdminAsync() =>
+        CurrentUserId is int actorId
+            ? _db.Users.AnyAsync(user =>
+                user.Id == actorId &&
+                user.Role == "AdminVIP" &&
+                user.IsActive &&
+                user.IsVipAdmin)
+            : Task.FromResult(false);
 
     private void Log(int employeeId, string action, string details)
     {
@@ -80,6 +89,13 @@ public class EmployeesController : ControllerBase
                         (employee.UserId == null &&
                             user.Email.ToLower() == employee.Email.ToLower()))
                     .Select(user => user.Role)
+                    .FirstOrDefault(),
+                IsVipAdmin = _db.Users
+                    .Where(user =>
+                        (int?)user.Id == employee.UserId ||
+                        (employee.UserId == null &&
+                            user.Email.ToLower() == employee.Email.ToLower()))
+                    .Select(user => (bool?)user.IsVipAdmin)
                     .FirstOrDefault(),
                 AccountIsActive = _db.Users
                     .Where(user =>
@@ -139,6 +155,7 @@ public class EmployeesController : ControllerBase
                 UserId = user.Id,
                 Username = user.Username,
                 UserRole = user.Role,
+                IsVipAdmin = user.IsVipAdmin,
                 AccountIsActive = user.IsActive,
                 MustChangePassword = user.MustChangePassword,
                 ProfilePending = true
@@ -160,6 +177,10 @@ public class EmployeesController : ControllerBase
         {
             return BadRequest(new { message = "Vai trò nhân viên không hợp lệ." });
         }
+
+        var isVipAdmin = await IsCurrentUserVipAdminAsync();
+        if (role == "Admin" && !isVipAdmin)
+            return Forbid();
 
         var email = input.Email.Trim().ToLowerInvariant();
         var fullName = input.FullName.Trim();
@@ -266,6 +287,14 @@ public class EmployeesController : ControllerBase
                     message = "Tài khoản này đã được liên kết với nhân viên khác."
                 });
             }
+
+            if (linkedUser?.IsVipAdmin == true ||
+                ((linkedUser?.Role == "Admin" ||
+                    linkedUser?.Role == "AdminVIP") &&
+                    !isVipAdmin))
+            {
+                return Forbid();
+            }
         }
 
         try
@@ -367,6 +396,20 @@ public class EmployeesController : ControllerBase
             : await _db.Users.FirstOrDefaultAsync(
                 user => user.Email.ToLower() == email);
 
+        var isVipAdmin = await IsCurrentUserVipAdminAsync();
+        if (linkedUser != null &&
+            (linkedUser.IsVipAdmin ||
+                linkedUser.Id == CurrentUserId ||
+                ((linkedUser.Role == "Admin" ||
+                    linkedUser.Role == "AdminVIP") &&
+                    !isVipAdmin) ||
+                (!employee.UserId.HasValue &&
+                    RoleFromEmployeeCode(employee.EmployeeCode) == "Admin" &&
+                    !isVipAdmin)))
+        {
+            return Forbid();
+        }
+
         if (linkedUser != null)
         {
             if (await _db.Users.AnyAsync(
@@ -435,6 +478,18 @@ public class EmployeesController : ControllerBase
             ? await _db.Users.FindAsync(employee.UserId.Value)
             : await _db.Users.FirstOrDefaultAsync(
                 user => user.Email.ToLower() == employee.Email.ToLower());
+        var isVipAdmin = await IsCurrentUserVipAdminAsync();
+
+        if (linkedUser != null &&
+            (linkedUser.IsVipAdmin ||
+                linkedUser.Id == CurrentUserId ||
+                ((linkedUser.Role == "Admin" ||
+                    linkedUser.Role == "AdminVIP") &&
+                    !isVipAdmin)))
+        {
+            return Forbid();
+        }
+
         if (linkedUser == null &&
             (!string.IsNullOrWhiteSpace(input.UserRole) ||
                 input.AccountIsActive.HasValue))
@@ -471,6 +526,28 @@ public class EmployeesController : ControllerBase
                 ? RoleFromEmployeeCode(employee.EmployeeCode)
                 : null
             : input.UserRole;
+
+        if (targetRole == "Admin" && !isVipAdmin)
+            return Forbid();
+
+        if (linkedUser != null &&
+            (input.AccountIsActive == false ||
+                input.Status == "Inactive") &&
+            (linkedUser.Role == "Admin" ||
+                linkedUser.Role == "AdminVIP") &&
+            !isVipAdmin)
+        {
+            return Forbid();
+        }
+
+        if (linkedUser != null &&
+            ((input.AccountIsActive == true && !linkedUser.IsActive) ||
+                (input.Status == "Active" && employee.Status != "Active")) &&
+            !isVipAdmin)
+        {
+            return Forbid();
+        }
+
         if (linkedUser != null && targetRole != null &&
             linkedUser.Role != targetRole)
         {
@@ -545,6 +622,7 @@ public class EmployeeResponse
     public int? UserId { get; set; }
     public string? Username { get; set; }
     public string? UserRole { get; set; }
+    public bool? IsVipAdmin { get; set; }
     public bool? AccountIsActive { get; set; }
     public bool? MustChangePassword { get; set; }
     public bool ProfilePending { get; set; }

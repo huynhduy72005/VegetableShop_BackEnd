@@ -104,7 +104,7 @@ namespace VegetableShopAPI.Controllers
         // ============================================================
 
         // GET: api/vouchers
-        [Authorize(Roles = "Admin")]
+        [Authorize(Roles = "Admin,AdminVIP")]
         [HttpGet]
         public async Task<IActionResult> GetAllVouchers()
         {
@@ -147,7 +147,7 @@ namespace VegetableShopAPI.Controllers
         }
 
         // POST: api/vouchers
-        [Authorize(Roles = "Admin")]
+        [Authorize(Roles = "Admin,AdminVIP")]
         [HttpPost]
         public async Task<IActionResult> CreateVoucher([FromBody] UpsertVoucherDto dto)
         {
@@ -201,7 +201,7 @@ namespace VegetableShopAPI.Controllers
         }
 
         // PUT: api/vouchers/{id}
-        [Authorize(Roles = "Admin")]
+        [Authorize(Roles = "Admin,AdminVIP")]
         [HttpPut("{id:int}")]
         public async Task<IActionResult> UpdateVoucher(int id, [FromBody] UpsertVoucherDto dto)
         {
@@ -254,7 +254,7 @@ namespace VegetableShopAPI.Controllers
         }
 
         // DELETE: api/vouchers/{id}
-        [Authorize(Roles = "Admin")]
+        [Authorize(Roles = "Admin,AdminVIP")]
         [HttpDelete("{id:int}")]
         public async Task<IActionResult> DeleteVoucher(int id)
         {

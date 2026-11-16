@@ -780,6 +780,7 @@ namespace VegetableShopAPI.Controllers
                 new Claim(ClaimTypes.Name, user.Username),
                 new Claim(ClaimTypes.Email, user.Email),
                 new Claim(ClaimTypes.Role, user.Role),
+                new Claim("admin_vip", user.IsVipAdmin.ToString().ToLowerInvariant()),
                 new Claim("must_change_password", user.MustChangePassword.ToString().ToLowerInvariant()),
                 new Claim("password_fingerprint", Convert.ToHexString(
                     HMACSHA256.HashData(
@@ -805,6 +806,7 @@ namespace VegetableShopAPI.Controllers
             user.Gender,
             user.DateOfBirth,
             user.Role,
+            user.IsVipAdmin,
             user.IsActive,
             user.MustChangePassword,
             user.AvatarUrl
@@ -814,15 +816,27 @@ namespace VegetableShopAPI.Controllers
         public async Task<IActionResult> CheckPasswordResetEligibility(
             [FromBody] PasswordResetEligibilityDto dto)
         {
-            var userRole = await _context.Users
+            var account = await _context.Users
                 .Where(user => user.Email.ToLower() == dto.Email.Trim().ToLower())
-                .Select(user => user.Role)
+                .Select(user => new
+                {
+                    user.Role,
+                    user.IsVipAdmin
+                })
                 .FirstOrDefaultAsync();
 
-            if (userRole == null)
+            if (account == null)
                 return NotFound(new { message = "Không tìm thấy tài khoản với email này." });
 
-            return Ok(new { requiresAdminRecoveryKey = userRole == "Admin" });
+            if (account.IsVipAdmin)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new
+                {
+                    message = "Quản trị viên VIP không thể dùng chức năng tự phục vụ quên mật khẩu."
+                });
+            }
+
+            return Ok(new { requiresAdminRecoveryKey = account.Role == "Admin" });
         }
 
         [HttpPost("password-reset-requests")]
@@ -834,6 +848,14 @@ namespace VegetableShopAPI.Controllers
 
             if (user == null)
                 return Ok(new { success = true, status = "Pending" });
+
+            if (user.IsVipAdmin)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new
+                {
+                    message = "Quản trị viên VIP không thể gửi yêu cầu tự phục vụ quên mật khẩu."
+                });
+            }
 
             if (user.Role == "Admin")
             {
@@ -900,6 +922,52 @@ namespace VegetableShopAPI.Controllers
             });
         }
 
+        [AllowAnonymous]
+        [HttpPost("vip/emergency-password-reset")]
+        public async Task<IActionResult> EmergencyVipPasswordReset(
+            [FromBody] VipEmergencyPasswordResetDto dto)
+        {
+            var recoveryKey = _configuration["PasswordRecovery:VipEmergencyKey"];
+            if (string.IsNullOrEmpty(recoveryKey) ||
+                Encoding.UTF8.GetByteCount(recoveryKey) < 32)
+            {
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+                {
+                    message = "Secret khôi phục khẩn cấp VIP chưa được cấu hình an toàn."
+                });
+            }
+
+            if (!FixedTimeEquals(dto.RecoveryKey, recoveryKey))
+            {
+                return Unauthorized(new
+                {
+                    message = "Secret khôi phục khẩn cấp không hợp lệ."
+                });
+            }
+
+            var user = await _context.Users.FirstOrDefaultAsync(account =>
+                account.Email.ToLower() == "admin@gmail.com" &&
+                account.IsVipAdmin);
+            if (user == null)
+                return NotFound(new { message = "Không tìm thấy tài khoản Quản trị viên VIP." });
+
+            user.PasswordHash = _credentials.HashPassword(user, dto.NewPassword);
+            user.MustChangePassword = false;
+            _context.EmployeeActivityLogs.Add(new EmployeeActivityLog
+            {
+                Action = "VIP_EMERGENCY_PASSWORD_RESET",
+                Details = "Khôi phục mật khẩu Quản trị viên VIP bằng secret vận hành.",
+                CreatedAt = DateTime.UtcNow
+            });
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                success = true,
+                message = "Đã khôi phục mật khẩu Quản trị viên VIP."
+            });
+        }
+
         [HttpGet("password-reset-requests/{id:guid}/status")]
         public async Task<IActionResult> GetPasswordResetRequestStatus(Guid id)
         {
@@ -913,12 +981,14 @@ namespace VegetableShopAPI.Controllers
                 : Ok(new { status });
         }
 
-        [Authorize(Roles = "Admin")]
+        [Authorize(Roles = "Admin,AdminVIP")]
         [HttpGet("password-reset-requests")]
         public async Task<IActionResult> GetPasswordResetRequests()
         {
             var requests = await _context.PasswordResetRequests
-                .Where(request => request.Status == "Pending")
+                .Where(request =>
+                    request.Status == "Pending" &&
+                    !request.User.IsVipAdmin)
                 .OrderBy(request => request.CreatedAtUtc)
                 .Select(request => new
                 {
@@ -934,7 +1004,7 @@ namespace VegetableShopAPI.Controllers
             return Ok(requests);
         }
 
-        [Authorize(Roles = "Admin")]
+        [Authorize(Roles = "Admin,AdminVIP")]
         [HttpPost("password-reset-requests/{id:guid}/approve")]
         public async Task<IActionResult> ApprovePasswordResetRequest(Guid id)
         {
@@ -946,6 +1016,14 @@ namespace VegetableShopAPI.Controllers
 
             if (request == null)
                 return NotFound(new { message = "Yêu cầu không tồn tại hoặc đã được xử lý." });
+
+            if (request.User.IsVipAdmin)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new
+                {
+                    message = "Chỉ quy trình khôi phục khẩn cấp mới được đặt lại mật khẩu Quản trị viên VIP."
+                });
+            }
 
             request.User.PasswordHash = string.IsNullOrEmpty(request.NewPasswordHash)
                 ? _credentials.HashPassword(
@@ -963,7 +1041,7 @@ namespace VegetableShopAPI.Controllers
             return Ok(new { success = true, message = "Đã chấp nhận yêu cầu đổi mật khẩu." });
         }
 
-        [Authorize(Roles = "Admin")]
+        [Authorize(Roles = "Admin,AdminVIP")]
         [HttpPost("password-reset-requests/{id:guid}/reject")]
         public async Task<IActionResult> RejectPasswordResetRequest(Guid id)
         {
@@ -999,6 +1077,14 @@ namespace VegetableShopAPI.Controllers
             var user = await _context.Users.FindAsync(id);
             if (user == null)
                 return NotFound(new { message = "Không tìm thấy người dùng!" });
+
+            if (user.IsVipAdmin)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new
+                {
+                    message = "Quản trị viên VIP không thể tự đổi mật khẩu."
+                });
+            }
 
             if (!_credentials.VerifyPassword(
                 user,
@@ -1048,6 +1134,18 @@ namespace VegetableShopAPI.Controllers
                 return NotFound(new { message = "Không tìm thấy người dùng!" });
 
             var email = dto.Email.Trim();
+            if (user.IsVipAdmin &&
+                !string.Equals(
+                    email,
+                    "admin@gmail.com",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return BadRequest(new
+                {
+                    message = "Email của tài khoản Quản trị viên VIP không thể thay đổi."
+                });
+            }
+
             if (await _context.Users.AnyAsync(account => account.Id != id && account.Email == email))
                 return Conflict(new { message = "Email này đã được tài khoản khác sử dụng." });
 
@@ -1142,7 +1240,7 @@ namespace VegetableShopAPI.Controllers
         }
 
         // GET: api/users (Lấy danh sách tất cả tài khoản - Dành cho Admin)
-        [Authorize(Roles = "Admin")]
+        [Authorize(Roles = "Admin,AdminVIP")]
         [HttpGet]
         public async Task<IActionResult> GetAllUsers()
         {
@@ -1154,20 +1252,34 @@ namespace VegetableShopAPI.Controllers
                     user.FullName,
                     user.Email,
                     user.Role,
+                    user.IsVipAdmin,
                     user.IsActive,
-                    user.MustChangePassword
+                    user.MustChangePassword,
+                    user.Phone,
+                    user.Gender,
+                    user.DateOfBirth
                 })
                 .ToListAsync();
             return Ok(users);
         }
 
         // PUT: api/users/5/role (Cập nhật quyền của tài khoản)
-        [Authorize(Roles = "Admin")]
+        [Authorize(Roles = "Admin,AdminVIP")]
         [HttpPut("{id}/role")]
         public async Task<IActionResult> UpdateUserRole(int id, [FromBody] RoleUpdateDto dto)
         {
             var user = await _context.Users.FindAsync(id);
             if (user == null) return NotFound(new { message = "Không tìm thấy người dùng!" });
+
+            var actorId = GetAuthenticatedUserId();
+            if (actorId == null || actorId == id || user.IsVipAdmin)
+                return Forbid();
+
+            var isVipAdmin = await IsVipAdminAsync(actorId.Value);
+            if ((user.Role == "Admin" || user.Role == "AdminVIP" ||
+                 dto.Role == "Admin" || dto.Role == "AdminVIP") &&
+                !isVipAdmin)
+                return Forbid();
 
             if (dto.Role != "Admin" &&
                 dto.Role != "Staff" &&
@@ -1178,6 +1290,7 @@ namespace VegetableShopAPI.Controllers
 
             var employee = await _context.Employees.FirstOrDefaultAsync(
                 profile => profile.UserId == id);
+            var oldRole = user.Role;
 
             await using var transaction = await _context.Database
                 .BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
@@ -1187,31 +1300,38 @@ namespace VegetableShopAPI.Controllers
                     dto.Role,
                     employee.Id,
                     employee.EmployeeCode);
-                _context.EmployeeActivityLogs.Add(new EmployeeActivityLog
-                {
-                    EmployeeId = employee.Id,
-                    ActorUserId = int.TryParse(
-                        User.FindFirstValue(ClaimTypes.NameIdentifier),
-                        out var actorId) ? actorId : null,
-                    Action = "UPDATE_EMPLOYEE_ROLE",
-                    Details = $"Đổi vai trò thành {dto.Role}; mã mới {employee.EmployeeCode}",
-                    CreatedAt = DateTime.UtcNow
-                });
             }
 
             user.Role = dto.Role;
+            _context.EmployeeActivityLogs.Add(new EmployeeActivityLog
+            {
+                EmployeeId = employee?.Id,
+                ActorUserId = actorId,
+                Action = "UPDATE_USER_ROLE",
+                Details = $"Tài khoản {user.Email}: {oldRole} -> {dto.Role}",
+                CreatedAt = DateTime.UtcNow
+            });
             await _context.SaveChangesAsync();
             await transaction.CommitAsync();
             return Ok(new { success = true, message = "Cập nhật quyền thành công!" });
         }
 
         // DELETE: api/users/5 (Vô hiệu hóa tài khoản, giữ nguyên lịch sử liên quan)
-        [Authorize(Roles = "Admin")]
+        [Authorize(Roles = "Admin,AdminVIP")]
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteUser(int id)
         {
             var user = await _context.Users.FindAsync(id);
             if (user == null) return NotFound(new { message = "Không tìm thấy người dùng!" });
+
+            var actorId = GetAuthenticatedUserId();
+            if (actorId == null || actorId == id || user.IsVipAdmin)
+                return Forbid();
+
+            var isVipAdmin = await IsVipAdminAsync(actorId.Value);
+            if ((user.Role == "Admin" || user.Role == "AdminVIP") &&
+                !isVipAdmin)
+                return Forbid();
 
             if (!user.IsActive)
             {
@@ -1230,9 +1350,7 @@ namespace VegetableShopAPI.Controllers
                 _context.EmployeeActivityLogs.Add(new EmployeeActivityLog
                 {
                     EmployeeId = employee.Id,
-                    ActorUserId = int.TryParse(
-                        User.FindFirstValue(ClaimTypes.NameIdentifier),
-                        out var actorId) ? actorId : null,
+                    ActorUserId = actorId,
                     Action = "DEACTIVATE_ACCOUNT",
                     Details = "Vô hiệu hóa tài khoản đăng nhập và hồ sơ nhân viên.",
                     CreatedAt = DateTime.UtcNow
@@ -1241,6 +1359,16 @@ namespace VegetableShopAPI.Controllers
 
             user.IsActive = false;
             user.MustChangePassword = false;
+            if (employee == null)
+            {
+                _context.EmployeeActivityLogs.Add(new EmployeeActivityLog
+                {
+                    ActorUserId = actorId,
+                    Action = "DEACTIVATE_ACCOUNT",
+                    Details = $"Vô hiệu hóa tài khoản {user.Email}.",
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
             await _context.SaveChangesAsync();
             return Ok(new
             {
@@ -1248,6 +1376,68 @@ namespace VegetableShopAPI.Controllers
                 message = "Đã vô hiệu hóa tài khoản. Lịch sử đơn hàng được giữ nguyên."
             });
         }
+
+        [Authorize(Roles = "Admin,AdminVIP")]
+        [HttpPut("{id:int}/restore")]
+        public async Task<IActionResult> RestoreUser(int id)
+        {
+            var user = await _context.Users.FindAsync(id);
+            if (user == null)
+                return NotFound(new { message = "Không tìm thấy người dùng!" });
+
+            var actorId = GetAuthenticatedUserId();
+            if (actorId == null || actorId == id)
+                return Forbid();
+
+            var isVipAdmin = await IsVipAdminAsync(actorId.Value);
+            if (!isVipAdmin)
+                return Forbid();
+
+            if (user.IsActive)
+            {
+                return Ok(new
+                {
+                    success = true,
+                    message = "Tài khoản đang hoạt động."
+                });
+            }
+
+            var employee = await _context.Employees
+                .FirstOrDefaultAsync(profile => profile.UserId == id);
+            if (employee != null)
+                employee.Status = "Active";
+
+            user.IsActive = true;
+            _context.EmployeeActivityLogs.Add(new EmployeeActivityLog
+            {
+                EmployeeId = employee?.Id,
+                ActorUserId = actorId,
+                Action = "RESTORE_ACCOUNT",
+                Details = $"Khôi phục tài khoản {user.Email}.",
+                CreatedAt = DateTime.UtcNow
+            });
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                success = true,
+                message = "Đã khôi phục tài khoản."
+            });
+        }
+
+        private int? GetAuthenticatedUserId() =>
+            int.TryParse(
+                User.FindFirstValue(ClaimTypes.NameIdentifier),
+                out var actorId)
+                ? actorId
+                : null;
+
+        private Task<bool> IsVipAdminAsync(int actorId) =>
+            _context.Users.AnyAsync(account =>
+                account.Id == actorId &&
+                account.Role == "AdminVIP" &&
+                account.IsActive &&
+                account.IsVipAdmin);
 
         public class RegisterUserInput
         {
@@ -1327,6 +1517,16 @@ namespace VegetableShopAPI.Controllers
             public string NewPassword { get; set; } = string.Empty;
 
             public string AdminRecoveryKey { get; set; } = string.Empty;
+        }
+
+        public class VipEmergencyPasswordResetDto
+        {
+            [Required]
+            public string RecoveryKey { get; set; } = string.Empty;
+
+            [Required]
+            [MinLength(16)]
+            public string NewPassword { get; set; } = string.Empty;
         }
 
         public class PasswordResetEligibilityDto

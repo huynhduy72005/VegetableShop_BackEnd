@@ -97,6 +97,8 @@ builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
 builder.Services.AddScoped<AccountCredentialService>();
 builder.Services.AddScoped<EmployeeCodeService>();
 builder.Services.AddScoped<EmployeePermissionService>();
+builder.Services.AddScoped<AdminBootstrapService>();
+builder.Services.AddHostedService<AdminBootstrapHostedService>();
 
 builder.Services.AddCors(options =>
 {
@@ -154,7 +156,8 @@ builder.Services
                     .Select(account => new
                     {
                         account.PasswordHash,
-                        account.IsActive
+                        account.IsActive,
+                        account.IsVipAdmin
                     })
                     .FirstOrDefaultAsync();
                 var currentFingerprint = user == null || !user.IsActive
@@ -180,6 +183,18 @@ builder.Services
                 {
                     context.Fail(
                         "Mật khẩu tài khoản đã thay đổi. Hãy đăng nhập lại.");
+                    return;
+                }
+
+                var vipClaim = context.Principal?
+                    .FindFirstValue("admin_vip");
+                if (user == null ||
+                    !bool.TryParse(vipClaim, out var tokenIsVipAdmin) ||
+                    tokenIsVipAdmin != user.IsVipAdmin)
+                {
+                    context.Fail(
+                        "Quyền quản trị đã thay đổi. Hãy đăng nhập lại.");
+                    return;
                 }
 
                 var employeeIsInactive = await db.Employees
@@ -213,9 +228,9 @@ app.UseStaticFiles();
 app.UseAuthentication();
 app.Use(async (context, next) =>
 {
-    var requiresPasswordChange = context.User.HasClaim(
-        "must_change_password",
-        "true");
+    var requiresPasswordChange =
+        !context.User.HasClaim("admin_vip", "true") &&
+        context.User.HasClaim("must_change_password", "true");
     var isChangePasswordRequest =
         context.Request.Path.Value?.StartsWith(
             "/api/users/change-password/",
