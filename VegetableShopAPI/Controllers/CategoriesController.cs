@@ -38,10 +38,6 @@ namespace VegetableShopAPI.Controllers
             _context.Categories.Add(category);
             await _context.SaveChangesAsync();
 
-            // Xóa hoặc comment dòng cũ bị lỗi:
-            // return CreatedAtAction("GetCategory", new { id = category.Id }, category);
-
-            // SỬA THÀNH DÒNG NÀY:
             return Ok(category);
         }
 
