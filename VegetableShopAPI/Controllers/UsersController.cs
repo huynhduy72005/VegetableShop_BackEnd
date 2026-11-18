@@ -656,6 +656,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.RegularExpressions;
 using Microsoft.IdentityModel.Tokens;
 using VegetableShopAPI.Data;
@@ -673,13 +674,17 @@ namespace VegetableShopAPI.Controllers
         private readonly IConfiguration _configuration;
         private readonly AccountCredentialService _credentials;
         private readonly EmployeeCodeService _employeeCodes;
+        private readonly IEmailService _emailService;
+        private readonly ILogger<UsersController> _logger;
 
         public UsersController(
             ApplicationDbContext context,
             IDataProtectionProvider dataProtectionProvider,
             IConfiguration configuration,
             AccountCredentialService credentials,
-            EmployeeCodeService employeeCodes)
+            EmployeeCodeService employeeCodes,
+            IEmailService emailService,
+            ILogger<UsersController> logger)
         {
             _context = context;
             _passwordProtector = dataProtectionProvider.CreateProtector(
@@ -687,6 +692,8 @@ namespace VegetableShopAPI.Controllers
             _configuration = configuration;
             _credentials = credentials;
             _employeeCodes = employeeCodes;
+            _emailService = emailService;
+            _logger = logger;
         }
 
         [HttpPost("register")]
@@ -712,7 +719,86 @@ namespace VegetableShopAPI.Controllers
 
             _context.Users.Add(user);
             await _context.SaveChangesAsync();
-            return Ok(new { success = true, message = "Đăng ký thành công!" });
+
+            var emailSent = await TrySendWelcomeEmailAsync(user);
+            var message = emailSent
+                ? "Đăng ký thành công! Email chào mừng đã được gửi."
+                : "Đăng ký thành công nhưng chưa gửi được email chào mừng. Vui lòng liên hệ cửa hàng.";
+            return Ok(new { success = true, emailSent, message });
+        }
+
+        private async Task<bool> TrySendWelcomeEmailAsync(User user)
+        {
+            try
+            {
+                var name = HtmlEncoder.Default.Encode(user.FullName);
+                var body = $"""
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f3f8f2; padding: 32px 12px; font-family: Arial, Helvetica, sans-serif;">
+                        <tr>
+                            <td align="center">
+                                <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width: 100%; max-width: 600px; background-color: #ffffff; border-radius: 16px; overflow: hidden;">
+                                    <tr>
+                                        <td align="center" style="padding: 28px 24px; background-color: #16834a; color: #ffffff;">
+                                            <div style="font-size: 15px; font-weight: bold; letter-spacing: 1px;">🌱 VƯỜN NHÀ</div>
+                                            <div style="margin-top: 12px; font-size: 32px;">👋</div>
+                                            <h1 style="margin: 8px 0 0; font-size: 24px;">Xin chào, {name}!</h1>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding: 32px 28px; color: #374151; font-size: 16px; line-height: 1.7;">
+                                            <h2 style="margin: 0 0 12px; color: #166534; font-size: 21px;">Chào mừng bạn đến với Vườn Nhà!</h2>
+                                            <p style="margin: 0 0 16px;">Tài khoản của bạn đã được tạo thành công. Cảm ơn bạn đã đăng ký và đồng hành cùng chúng tôi.</p>
+                                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin: 22px 0; background-color: #f0fdf4; border-radius: 10px;">
+                                                <tr>
+                                                    <td style="padding: 16px; color: #166534;">🥬 <strong>Chúc bạn có những trải nghiệm mua sắm thật vui vẻ!</strong></td>
+                                                </tr>
+                                            </table>
+                                            <p style="margin: 0;">Thân mến,<br /><strong style="color: #16834a;">Đội ngũ Vườn Nhà</strong> 💚</p>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td align="center" style="padding: 16px 24px; background-color: #f9fafb; color: #9ca3af; font-size: 12px;">
+                                            Email này được gửi tự động sau khi bạn đăng ký tài khoản tại Vườn Nhà.
+                                        </td>
+                                    </tr>
+                                </table>
+                            </td>
+                        </tr>
+                    </table>
+                    """;
+                var sendTask = _emailService.SendEmailAsync(
+                    user.Email,
+                    "Chào mừng bạn đến với Vườn Nhà",
+                    body);
+                var completedTask = await Task.WhenAny(
+                    sendTask,
+                    Task.Delay(TimeSpan.FromSeconds(10)));
+
+                if (completedTask != sendTask)
+                {
+                    _logger.LogWarning(
+                        "Gửi email chào mừng tới {Email} quá 10 giây.",
+                        user.Email);
+                    _ = sendTask.ContinueWith(
+                        task => _logger.LogError(
+                            task.Exception,
+                            "Gửi email chào mừng tới {Email} thất bại sau timeout.",
+                            user.Email),
+                        TaskContinuationOptions.OnlyOnFaulted);
+                    return false;
+                }
+
+                await sendTask;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "Không gửi được email chào mừng tới {Email}.",
+                    user.Email);
+                return false;
+            }
         }
 
         [HttpPost("login")]
