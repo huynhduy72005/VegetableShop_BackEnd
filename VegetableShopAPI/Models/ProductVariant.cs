@@ -8,6 +8,7 @@ namespace VegetableShopAPI.Models
     public class ProductVariant
     {
         public int Id { get; set; }
+
         public int ProductId { get; set; }
 
         [Required]
@@ -26,9 +27,13 @@ namespace VegetableShopAPI.Models
         public string? Image { get; set; }
 
         public bool IsDefault { get; set; } = false;
+
         public bool IsVisible { get; set; } = true;
 
         [JsonIgnore]
         public Product? Product { get; set; }
+
+        [JsonIgnore]
+        public List<ProductBatch>? Batches { get; set; }
     }
 }

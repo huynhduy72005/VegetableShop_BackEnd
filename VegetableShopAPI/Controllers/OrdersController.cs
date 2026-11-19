@@ -43,13 +43,12 @@ namespace VegetableShopAPI.Controllers
             _permissions = permissions;
         }
 
-        // POST: api/orders (Tạo đơn hàng mới từ giỏ hàng)
+        // POST: api/orders (Tạo đơn hàng mới từ giỏ hàng + trừ kho FEFO)
         [HttpPost]
         public async Task<IActionResult> CreateOrder([FromBody] OrderDto orderDto)
         {
             try
             {
-                // 0a. Kiểm tra biến thể: phải thuộc đúng sản phẩm, còn đủ hàng; GIÁ lấy từ database
                 var variantIds = orderDto.Items
                     .Where(i => i.VariantId.HasValue)
                     .Select(i => i.VariantId!.Value)
@@ -60,16 +59,31 @@ namespace VegetableShopAPI.Controllers
                     .ToDictionaryAsync(v => v.Id);
 
                 var orderedProductIds = orderDto.Items.Select(i => i.ProductId).Distinct().ToList();
+                var productMap = await _context.Products.AsNoTracking()
+                    .Where(p => orderedProductIds.Contains(p.Id))
+                    .ToDictionaryAsync(p => p.Id);
+
                 var productsWithVariants = (await _context.ProductVariants.AsNoTracking()
                     .Where(v => orderedProductIds.Contains(v.ProductId))
                     .Select(v => v.ProductId)
                     .Distinct()
                     .ToListAsync()).ToHashSet();
 
+                // Kiểm tra tồn kho khả dụng (ưu tiên tính từ các lô CÒN HẠN nếu sản phẩm có quản lý lô)
+                var today = DateTime.Today;
+                var allBatchesForOrderedProducts = await _context.ProductBatches.AsNoTracking()
+                    .Where(b => orderedProductIds.Contains(b.ProductId))
+                    .ToListAsync();
+
                 foreach (var item in orderDto.Items)
                 {
+                    if (!productMap.TryGetValue(item.ProductId, out var product) || !product.IsVisible)
+                    {
+                        return BadRequest(new { success = false, message = "Có sản phẩm không tồn tại hoặc đã ngừng bán." });
+                    }
+
                     if (!item.VariantId.HasValue)
-                        item.VariantName = null; // tên biến thể chỉ lấy từ database, không tin trình duyệt
+                        item.VariantName = null;
 
                     if (item.VariantId.HasValue)
                     {
@@ -80,9 +94,17 @@ namespace VegetableShopAPI.Controllers
                             return BadRequest(new { success = false, message = "Loại sản phẩm không hợp lệ, đã ngừng bán hoặc đã bị xóa. Vui lòng chọn lại." });
                         }
 
-                        if (variant.Quantity < item.Quantity)
+                        var variantBatches = allBatchesForOrderedProducts
+                            .Where(b => b.ProductId == item.ProductId && b.ProductVariantId == item.VariantId.Value)
+                            .ToList();
+
+                        var availableStock = variantBatches.Count > 0
+                            ? variantBatches.Where(b => b.ExpiryDate.Date >= today).Sum(b => b.RemainingQuantity)
+                            : variant.Quantity;
+
+                        if (availableStock < item.Quantity)
                         {
-                            return BadRequest(new { success = false, message = $"Loại “{variant.Name}” chỉ còn {variant.Quantity} sản phẩm." });
+                            return BadRequest(new { success = false, message = $"Loại “{variant.Name}” chỉ còn {availableStock} sản phẩm khả dụng." });
                         }
 
                         item.Price = variant.Price;
@@ -91,6 +113,21 @@ namespace VegetableShopAPI.Controllers
                     else if (productsWithVariants.Contains(item.ProductId))
                     {
                         return BadRequest(new { success = false, message = "Có sản phẩm gồm nhiều loại, vui lòng chọn loại cụ thể trong trang chi tiết trước khi đặt hàng." });
+                    }
+                    else
+                    {
+                        var productBatches = allBatchesForOrderedProducts
+                            .Where(b => b.ProductId == item.ProductId && b.ProductVariantId == null)
+                            .ToList();
+
+                        var availableStock = productBatches.Count > 0
+                            ? productBatches.Where(b => b.ExpiryDate.Date >= today).Sum(b => b.RemainingQuantity)
+                            : product.Quantity;
+
+                        if (availableStock < item.Quantity)
+                        {
+                            return BadRequest(new { success = false, message = $"Sản phẩm “{product.Name}” chỉ còn {availableStock} {product.Unit} khả dụng." });
+                        }
                     }
                 }
                 var hasVariantLines = variantMap.Count > 0;
@@ -140,13 +177,13 @@ namespace VegetableShopAPI.Controllers
                     PaymentMethod = orderDto.PaymentMethod?.Trim() ?? string.Empty,
                     ShippingFee = orderDto.ShippingFee,
                     OrderDate = DateTime.Now,
-                    Status = "Pending" // Trạng thái chờ xử lý
+                    Status = "Pending"
                 };
 
                 _context.Orders.Add(order);
-                await _context.SaveChangesAsync(); // Lưu để lấy ID đơn hàng vừa tạo
+                await _context.SaveChangesAsync();
 
-                // 2. Lưu từng sản phẩm trong giỏ hàng vào bảng OrderDetails
+                // 2. Lưu chi tiết đơn hàng & Trừ tồn kho theo FEFO
                 foreach (var item in orderDto.Items)
                 {
                     var orderDetail = new OrderDetail
@@ -159,9 +196,11 @@ namespace VegetableShopAPI.Controllers
                         Price = item.Price
                     };
                     _context.OrderDetails.Add(orderDetail);
+
+                    await DeductStockFefoAsync(item.ProductId, item.VariantId, item.Quantity);
                 }
 
-                // Đánh dấu voucher đã dùng (cùng lần lưu với chi tiết đơn hàng)
+                // Đánh dấu voucher đã dùng
                 if (userVoucher != null)
                 {
                     userVoucher.UsedAt = DateTime.Now;
@@ -170,10 +209,10 @@ namespace VegetableShopAPI.Controllers
 
                 await _context.SaveChangesAsync();
 
-                // 3. Gửi email xác nhận (lỗi gửi mail KHÔNG làm hỏng đơn hàng)
+                // 3. Gửi email xác nhận
                 var emailSent = await TrySendOrderConfirmationEmailAsync(order, orderDto);
 
-                // 4. Báo cho chủ shop biết có đơn mới (gửi về Gmail trong EmailSettings)
+                // 4. Báo cho chủ shop biết có đơn mới
                 await TrySendShopNotificationEmailAsync(order, orderDto);
 
                 return Ok(new
@@ -187,13 +226,12 @@ namespace VegetableShopAPI.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Lỗi khi tạo đơn hàng");
-                // EF Core hay bọc lỗi thật (vd: Invalid column name) trong InnerException
                 var detail = ex.InnerException?.Message ?? ex.Message;
                 return BadRequest(new { success = false, message = "Lỗi khi đặt hàng: " + detail });
             }
         }
 
-        // GET: api/orders/revenue (Thống kê doanh thu)
+        // GET: api/orders/revenue (Thống kê tổng quát cho thẻ đầu trang Tổng quan)
         [HttpGet("revenue")]
         [Authorize]
         public async Task<IActionResult> GetRevenueStatistics()
@@ -202,18 +240,31 @@ namespace VegetableShopAPI.Controllers
                 return Forbid();
 
             var totalRevenue = await _context.Orders.SumAsync(o => o.TotalPrice);
+            var netRevenue = await _context.Orders
+                .Where(o => o.Status != "Cancelled")
+                .SumAsync(o => o.TotalPrice);
+            var completedRevenue = await _context.Orders
+                .Where(o => o.Status == "Completed")
+                .SumAsync(o => o.TotalPrice);
+
             var totalOrders = await _context.Orders.CountAsync();
             var pendingOrders = await _context.Orders.CountAsync(o => o.Status == "Pending");
+            var completedOrders = await _context.Orders.CountAsync(o => o.Status == "Completed");
+            var cancelledOrders = await _context.Orders.CountAsync(o => o.Status == "Cancelled");
 
             return Ok(new
             {
                 totalRevenue,
+                netRevenue,
+                completedRevenue,
                 totalOrders,
-                pendingOrders
+                pendingOrders,
+                completedOrders,
+                cancelledOrders
             });
         }
 
-        // GET: api/orders  (có thể lọc theo khách: api/orders?userId=5)
+        // GET: api/orders
         [HttpGet]
         [Authorize]
         public async Task<IActionResult> GetOrders([FromQuery] int? userId)
@@ -253,7 +304,6 @@ namespace VegetableShopAPI.Controllers
                     o.ShippingAddress
                 }).ToListAsync();
 
-            // Đếm số dòng sản phẩm của từng đơn
             var lineCounts = await _context.OrderDetails.AsNoTracking()
                 .GroupBy(d => d.OrderId)
                 .Select(g => new { OrderId = g.Key, Count = g.Count() })
@@ -273,7 +323,7 @@ namespace VegetableShopAPI.Controllers
             }));
         }
 
-        // GET: api/orders/5  (chi tiết một đơn hàng)
+        // GET: api/orders/5
         [HttpGet("{id:int}")]
         [Authorize]
         public async Task<IActionResult> GetOrder(int id)
@@ -396,9 +446,15 @@ namespace VegetableShopAPI.Controllers
             if (order == null)
                 return NotFound(new { message = "Không tìm thấy đơn hàng!" });
 
+            var wasCancelled = string.Equals(order.Status, "Cancelled", StringComparison.OrdinalIgnoreCase);
             order.Status = status;
-            if (status == "Cancelled")
+
+            if (status == "Cancelled" && !wasCancelled)
+            {
                 await ReleaseVoucherAsync(order.Id);
+                await RestoreStockOnCancelAsync(order.Id);
+            }
+
             await _context.SaveChangesAsync();
 
             return Ok(new { success = true, order.Id, order.Status });
@@ -427,12 +483,114 @@ namespace VegetableShopAPI.Controllers
 
             order.Status = "Cancelled";
             await ReleaseVoucherAsync(order.Id);
+            await RestoreStockOnCancelAsync(order.Id);
             await _context.SaveChangesAsync();
 
             return Ok(new { success = true, order.Id, order.Status });
         }
 
-        // Trả voucher về ví khi đơn bị hủy (chưa SaveChanges, nơi gọi sẽ lưu)
+        // ===================== THUẬT TOÁN TRỪ KHO FEFO & HOÀN KHO =====================
+
+        private async Task DeductStockFefoAsync(int productId, int? variantId, int quantityToDeduct)
+        {
+            var today = DateTime.Today;
+            var hasBatches = await _context.ProductBatches
+                .AnyAsync(b => b.ProductId == productId && b.ProductVariantId == variantId);
+
+            if (hasBatches)
+            {
+                var availableBatches = await _context.ProductBatches
+                    .Where(b => b.ProductId == productId &&
+                                b.ProductVariantId == variantId &&
+                                b.RemainingQuantity > 0 &&
+                                b.ExpiryDate.Date >= today)
+                    .OrderBy(b => b.ExpiryDate)
+                    .ThenBy(b => b.ImportDate)
+                    .ThenBy(b => b.Id)
+                    .ToListAsync();
+
+                var remaining = quantityToDeduct;
+                foreach (var batch in availableBatches)
+                {
+                    if (remaining <= 0) break;
+                    var take = Math.Min(batch.RemainingQuantity, remaining);
+                    batch.RemainingQuantity -= take;
+                    remaining -= take;
+                }
+
+                await _context.SaveChangesAsync();
+                await ProductBatchesController.RecalculateProductStockAsync(_context, productId);
+            }
+            else
+            {
+                var product = await _context.Products
+                    .Include(p => p.Variants)
+                    .FirstOrDefaultAsync(p => p.Id == productId);
+
+                if (product == null) return;
+
+                if (variantId.HasValue && product.Variants != null)
+                {
+                    var variant = product.Variants.FirstOrDefault(v => v.Id == variantId.Value);
+                    if (variant != null)
+                        variant.Quantity = Math.Max(0, variant.Quantity - quantityToDeduct);
+
+                    product.Quantity = product.Variants.Where(v => v.IsVisible).Sum(v => v.Quantity);
+                }
+                else
+                {
+                    product.Quantity = Math.Max(0, product.Quantity - quantityToDeduct);
+                }
+            }
+        }
+
+        private async Task RestoreStockOnCancelAsync(int orderId)
+        {
+            var details = await _context.OrderDetails
+                .Where(d => d.OrderId == orderId)
+                .ToListAsync();
+
+            var today = DateTime.Today;
+            foreach (var d in details)
+            {
+                var latestValidBatch = await _context.ProductBatches
+                    .Where(b => b.ProductId == d.ProductId &&
+                                b.ProductVariantId == d.ProductVariantId &&
+                                b.ExpiryDate.Date >= today)
+                    .OrderByDescending(b => b.ExpiryDate)
+                    .FirstOrDefaultAsync();
+
+                if (latestValidBatch != null)
+                {
+                    latestValidBatch.RemainingQuantity += d.Quantity;
+                    await _context.SaveChangesAsync();
+                    await ProductBatchesController.RecalculateProductStockAsync(_context, d.ProductId);
+                }
+                else
+                {
+                    var hasAnyBatches = await _context.ProductBatches.AnyAsync(b => b.ProductId == d.ProductId);
+                    if (!hasAnyBatches)
+                    {
+                        var product = await _context.Products
+                            .Include(p => p.Variants)
+                            .FirstOrDefaultAsync(p => p.Id == d.ProductId);
+                        if (product == null) continue;
+
+                        if (d.ProductVariantId.HasValue && product.Variants != null)
+                        {
+                            var v = product.Variants.FirstOrDefault(x => x.Id == d.ProductVariantId.Value);
+                            if (v != null) v.Quantity += d.Quantity;
+                            product.Quantity = product.Variants.Where(x => x.IsVisible).Sum(x => x.Quantity);
+                        }
+                        else
+                        {
+                            product.Quantity += d.Quantity;
+                        }
+                    }
+                }
+            }
+        }
+
         private async Task ReleaseVoucherAsync(int orderId)
         {
             var used = await _context.UserVouchers.FirstOrDefaultAsync(x => x.OrderId == orderId);
@@ -457,7 +615,6 @@ namespace VegetableShopAPI.Controllers
                     return false;
                 }
 
-                // Lấy tên sản phẩm để hiển thị trong mail
                 var productIds = orderDto.Items.Select(i => i.ProductId).Distinct().ToList();
                 var productNames = await _context.Products.AsNoTracking()
                     .Where(p => productIds.Contains(p.Id))
@@ -466,7 +623,6 @@ namespace VegetableShopAPI.Controllers
                 var subject = $"Xác nhận đơn hàng #{order.Id} - Vườn Nhà";
                 var body = BuildOrderEmailBody(order, orderDto, productNames);
 
-                // Chỉ chờ tối đa 10 giây để khách không bị treo màn hình nếu SMTP chậm/bị chặn
                 var sendTask = _emailService.SendEmailAsync(toEmail, subject, body);
                 var finished = await Task.WhenAny(sendTask, Task.Delay(TimeSpan.FromSeconds(10)));
 
@@ -479,7 +635,7 @@ namespace VegetableShopAPI.Controllers
                     return false;
                 }
 
-                await sendTask; // nếu gửi lỗi thì ném exception ở đây để catch bên dưới ghi log
+                await sendTask;
                 return true;
             }
             catch (Exception ex)
@@ -489,8 +645,6 @@ namespace VegetableShopAPI.Controllers
             }
         }
 
-        // Gửi thông báo "có đơn hàng mới" về Gmail của shop.
-        // Ưu tiên EmailSettings:AdminNotifyEmail (nếu bạn tự thêm), không có thì dùng EmailSettings:SenderEmail.
         private async Task TrySendShopNotificationEmailAsync(Order order, OrderDto orderDto)
         {
             try
@@ -635,7 +789,6 @@ namespace VegetableShopAPI.Controllers
         }
     }
 
-    // Class phụ trợ (DTO) để nhận dữ liệu JSON từ Frontend gửi lên
     public class OrderDto
     {
         public int UserId { get; set; }

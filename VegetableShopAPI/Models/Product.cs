@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel.DataAnnotations.Schema;
+using System.Text.Json.Serialization;
 
 namespace VegetableShopAPI.Models
 {
@@ -24,7 +25,8 @@ namespace VegetableShopAPI.Models
         //   []   = xóa hết biến thể
         public List<ProductVariant>? Variants { get; set; }
 
-
+        [JsonIgnore]
+        public List<ProductBatch>? Batches { get; set; }
 
     }
 }

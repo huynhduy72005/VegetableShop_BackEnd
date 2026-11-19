@@ -22,6 +22,46 @@ namespace VegetableShopAPI.Migrations
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
+            modelBuilder.Entity("VegetableShopAPI.Models.BatchDisposalLog", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("DisposedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("DisposedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ProductBatchId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ProductId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ProductVariantId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("QuantityDisposed")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DisposedAt");
+
+                    b.HasIndex("ProductBatchId");
+
+                    b.ToTable("BatchDisposalLogs", (string)null);
+                });
+
             modelBuilder.Entity("VegetableShopAPI.Models.Category", b =>
                 {
                     b.Property<int>("Id")
@@ -321,6 +361,61 @@ namespace VegetableShopAPI.Migrations
                     b.ToTable("Products");
                 });
 
+            modelBuilder.Entity("VegetableShopAPI.Models.ProductBatch", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("BatchCode")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTime>("ExpiryDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("ImportDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<decimal?>("ImportPrice")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("InitialQuantity")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int>("ProductId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ProductVariantId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("RemainingQuantity")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SupplierName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BatchCode");
+
+                    b.HasIndex("ExpiryDate");
+
+                    b.HasIndex("ProductId");
+
+                    b.HasIndex("ProductVariantId");
+
+                    b.ToTable("ProductBatches", (string)null);
+                });
+
             modelBuilder.Entity("VegetableShopAPI.Models.ProductVariant", b =>
                 {
                     b.Property<int>("Id")
@@ -520,6 +615,17 @@ namespace VegetableShopAPI.Migrations
                     b.ToTable("Vouchers");
                 });
 
+            modelBuilder.Entity("VegetableShopAPI.Models.BatchDisposalLog", b =>
+                {
+                    b.HasOne("VegetableShopAPI.Models.ProductBatch", "ProductBatch")
+                        .WithMany()
+                        .HasForeignKey("ProductBatchId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ProductBatch");
+                });
+
             modelBuilder.Entity("VegetableShopAPI.Models.Employee", b =>
                 {
                     b.HasOne("VegetableShopAPI.Models.User", null)
@@ -585,6 +691,24 @@ namespace VegetableShopAPI.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("VegetableShopAPI.Models.ProductBatch", b =>
+                {
+                    b.HasOne("VegetableShopAPI.Models.Product", "Product")
+                        .WithMany("Batches")
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("VegetableShopAPI.Models.ProductVariant", "ProductVariant")
+                        .WithMany("Batches")
+                        .HasForeignKey("ProductVariantId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
+                    b.Navigation("Product");
+
+                    b.Navigation("ProductVariant");
+                });
+
             modelBuilder.Entity("VegetableShopAPI.Models.ProductVariant", b =>
                 {
                     b.HasOne("VegetableShopAPI.Models.Product", "Product")
@@ -617,7 +741,14 @@ namespace VegetableShopAPI.Migrations
 
             modelBuilder.Entity("VegetableShopAPI.Models.Product", b =>
                 {
+                    b.Navigation("Batches");
+
                     b.Navigation("Variants");
+                });
+
+            modelBuilder.Entity("VegetableShopAPI.Models.ProductVariant", b =>
+                {
+                    b.Navigation("Batches");
                 });
 #pragma warning restore 612, 618
         }
