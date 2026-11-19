@@ -399,6 +399,9 @@ namespace VegetableShopAPI.Migrations
                     b.Property<int>("RemainingQuantity")
                         .HasColumnType("int");
 
+                    b.Property<int?>("SupplierId")
+                        .HasColumnType("int");
+
                     b.Property<string>("SupplierName")
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
@@ -412,6 +415,8 @@ namespace VegetableShopAPI.Migrations
                     b.HasIndex("ProductId");
 
                     b.HasIndex("ProductVariantId");
+
+                    b.HasIndex("SupplierId");
 
                     b.ToTable("ProductBatches", (string)null);
                 });
@@ -457,6 +462,68 @@ namespace VegetableShopAPI.Migrations
                     b.HasIndex("ProductId");
 
                     b.ToTable("ProductVariants", (string)null);
+                });
+
+            modelBuilder.Entity("VegetableShopAPI.Models.Supplier", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Address")
+                        .HasMaxLength(350)
+                        .HasColumnType("nvarchar(350)");
+
+                    b.Property<string>("CertificationCode")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTime?>("CertificationExpiryDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CertificationType")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<string>("ContactPerson")
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Email")
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("Phone")
+                        .HasMaxLength(25)
+                        .HasColumnType("nvarchar(25)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CertificationType");
+
+                    b.HasIndex("Name");
+
+                    b.ToTable("Suppliers", (string)null);
                 });
 
             modelBuilder.Entity("VegetableShopAPI.Models.User", b =>
@@ -704,9 +771,16 @@ namespace VegetableShopAPI.Migrations
                         .HasForeignKey("ProductVariantId")
                         .OnDelete(DeleteBehavior.NoAction);
 
+                    b.HasOne("VegetableShopAPI.Models.Supplier", "Supplier")
+                        .WithMany("Batches")
+                        .HasForeignKey("SupplierId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.Navigation("Product");
 
                     b.Navigation("ProductVariant");
+
+                    b.Navigation("Supplier");
                 });
 
             modelBuilder.Entity("VegetableShopAPI.Models.ProductVariant", b =>
@@ -747,6 +821,11 @@ namespace VegetableShopAPI.Migrations
                 });
 
             modelBuilder.Entity("VegetableShopAPI.Models.ProductVariant", b =>
+                {
+                    b.Navigation("Batches");
+                });
+
+            modelBuilder.Entity("VegetableShopAPI.Models.Supplier", b =>
                 {
                     b.Navigation("Batches");
                 });

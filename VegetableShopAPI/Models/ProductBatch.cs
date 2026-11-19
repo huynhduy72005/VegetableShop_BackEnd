@@ -18,6 +18,9 @@ namespace VegetableShopAPI.Models
         // Null nếu sản phẩm không chia biến thể; có giá trị nếu nhập theo từng loại/quy cách
         public int? ProductVariantId { get; set; }
 
+        // Liên kết tới bảng Nhà cung cấp / Nhà vườn
+        public int? SupplierId { get; set; }
+
         public DateTime ImportDate { get; set; } = DateTime.Now;
 
         public DateTime ExpiryDate { get; set; }
@@ -30,7 +33,7 @@ namespace VegetableShopAPI.Models
         public decimal? ImportPrice { get; set; } // Giá vốn nhập lô (tùy chọn)
 
         [MaxLength(200)]
-        public string? SupplierName { get; set; } // Nhà vườn / Nguồn nhập (tùy chọn)
+        public string? SupplierName { get; set; } // Lưu tên nhà vườn tại thời điểm nhập lô
 
         [MaxLength(500)]
         public string? Note { get; set; }
@@ -55,5 +58,8 @@ namespace VegetableShopAPI.Models
 
         [JsonIgnore]
         public ProductVariant? ProductVariant { get; set; }
+
+        [JsonIgnore]
+        public Supplier? Supplier { get; set; }
     }
 }

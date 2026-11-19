@@ -24,7 +24,7 @@ namespace VegetableShopAPI.Controllers
             _permissions = permissions;
         }
 
-        // GET: api/ProductBatches/product/5 (Lấy danh sách lô hàng của 1 sản phẩm)
+        // GET: api/ProductBatches/product/5 (Lấy danh sách lô hàng của 1 sản phẩm, kèm nhà cung cấp & chứng nhận)
         [HttpGet("product/{productId:int}")]
         public async Task<IActionResult> GetBatchesByProduct(int productId)
         {
@@ -47,9 +47,10 @@ namespace VegetableShopAPI.Controllers
 
             var batches = await _context.ProductBatches
                 .AsNoTracking()
+                .Include(b => b.Supplier)
                 .Where(b => b.ProductId == productId)
-                .OrderBy(b => b.RemainingQuantity <= 0 ? 1 : 0) // Lô còn hàng lên trước
-                .ThenBy(b => b.ExpiryDate)                      // Hết hạn trước lên đầu (FEFO)
+                .OrderBy(b => b.RemainingQuantity <= 0 ? 1 : 0)
+                .ThenBy(b => b.ExpiryDate)
                 .ThenBy(b => b.Id)
                 .ToListAsync();
 
@@ -62,12 +63,16 @@ namespace VegetableShopAPI.Controllers
                 VariantName = b.ProductVariantId.HasValue && variantMap.TryGetValue(b.ProductVariantId.Value, out var vName)
                     ? vName
                     : null,
+                b.SupplierId,
+                SupplierName = b.Supplier != null ? b.Supplier.Name : b.SupplierName,
+                CertificationType = b.Supplier?.CertificationType,
+                CertificationCode = b.Supplier?.CertificationCode,
+                SupplierAddress = b.Supplier?.Address,
                 b.ImportDate,
                 b.ExpiryDate,
                 b.InitialQuantity,
                 b.RemainingQuantity,
                 b.ImportPrice,
-                b.SupplierName,
                 b.Note,
                 b.DaysUntilExpiry,
                 b.Status
@@ -112,6 +117,8 @@ namespace VegetableShopAPI.Controllers
                 join p in _context.Products.AsNoTracking() on b.ProductId equals p.Id
                 join v in _context.ProductVariants.AsNoTracking() on b.ProductVariantId equals (int?)v.Id into vGroup
                 from variant in vGroup.DefaultIfEmpty()
+                join s in _context.Suppliers.AsNoTracking() on b.SupplierId equals (int?)s.Id into sGroup
+                from supplier in sGroup.DefaultIfEmpty()
                 orderby b.ExpiryDate ascending, b.Id ascending
                 select new
                 {
@@ -122,6 +129,9 @@ namespace VegetableShopAPI.Controllers
                     Unit = variant != null && variant.Unit != "" ? variant.Unit : p.Unit,
                     b.ProductVariantId,
                     VariantName = variant != null ? variant.Name : null,
+                    b.SupplierId,
+                    SupplierName = supplier != null ? supplier.Name : b.SupplierName,
+                    CertificationType = supplier != null ? supplier.CertificationType : null,
                     b.ImportDate,
                     b.ExpiryDate,
                     b.RemainingQuantity,
@@ -152,9 +162,9 @@ namespace VegetableShopAPI.Controllers
             });
         }
 
-        // POST: api/ProductBatches/import (Nhập lô hàng mới)
+        // POST: api/ProductBatches/import (Nhập lô hàng mới gắn với Nhà cung cấp / Nhà vườn)
         [HttpPost("import")]
-        public async Task<IActionResult> ImportBatch([FromBody] CreateBatchDto dto)
+        public async Task<IActionResult> ImportBatch([FromBody] ImportBatchWithSupplierDto dto)
         {
             if (!await _permissions.CanManageInventoryAsync(User))
                 return Forbid();
@@ -181,6 +191,19 @@ namespace VegetableShopAPI.Controllers
                 dto.ProductVariantId = null;
             }
 
+            Supplier? supplier = null;
+            if (dto.SupplierId.HasValue)
+            {
+                supplier = await _context.Suppliers
+                    .FirstOrDefaultAsync(s => s.Id == dto.SupplierId.Value);
+
+                if (supplier == null)
+                    return BadRequest(new { message = "Nhà cung cấp / nhà vườn được chọn không tồn tại." });
+
+                if (!supplier.IsActive)
+                    return BadRequest(new { message = $"Nhà cung cấp “{supplier.Name}” hiện đang ngừng hợp tác." });
+            }
+
             var importDate = dto.ImportDate ?? DateTime.Now;
             if (dto.ExpiryDate.Date < importDate.Date)
                 return BadRequest(new { message = "Hạn sử dụng không được nhỏ hơn ngày nhập kho." });
@@ -194,19 +217,21 @@ namespace VegetableShopAPI.Controllers
                 BatchCode = batchCode,
                 ProductId = dto.ProductId,
                 ProductVariantId = dto.ProductVariantId,
+                SupplierId = supplier?.Id,
                 ImportDate = importDate,
-                ExpiryDate = dto.ExpiryDate.Date.AddHours(23).AddMinutes(59), // Hết hạn cuối ngày
+                ExpiryDate = dto.ExpiryDate.Date.AddHours(23).AddMinutes(59),
                 InitialQuantity = dto.Quantity,
                 RemainingQuantity = dto.Quantity,
                 ImportPrice = dto.ImportPrice,
-                SupplierName = string.IsNullOrWhiteSpace(dto.SupplierName) ? null : dto.SupplierName.Trim(),
+                SupplierName = supplier != null
+                    ? supplier.Name
+                    : (string.IsNullOrWhiteSpace(dto.SupplierName) ? null : dto.SupplierName.Trim()),
                 Note = string.IsNullOrWhiteSpace(dto.Note) ? null : dto.Note.Trim()
             };
 
             _context.ProductBatches.Add(batch);
             await _context.SaveChangesAsync();
 
-            // Đồng bộ lại tồn kho khả dụng của sản phẩm & biến thể
             await RecalculateProductStockAsync(_context, dto.ProductId);
             await _context.SaveChangesAsync();
 
@@ -309,10 +334,6 @@ namespace VegetableShopAPI.Controllers
             return $"LO-SP{productId}-{datePrefix}-{(countToday + 1):D2}";
         }
 
-        /// <summary>
-        /// Tính lại tổng tồn kho bán được của Product & ProductVariant từ các lô CÒN HẠN SỬ DỤNG.
-        /// Nếu sản phẩm chưa từng nhập lô nào thì giữ nguyên tồn kho cũ để tương thích ngược.
-        /// </summary>
         public static async Task RecalculateProductStockAsync(ApplicationDbContext context, int productId)
         {
             var hasAnyBatches = await context.ProductBatches.AnyAsync(b => b.ProductId == productId);
@@ -355,5 +376,10 @@ namespace VegetableShopAPI.Controllers
                     .Sum(b => b.RemainingQuantity);
             }
         }
+    }
+
+    public class ImportBatchWithSupplierDto : CreateBatchDto
+    {
+        public int? SupplierId { get; set; }
     }
 }
