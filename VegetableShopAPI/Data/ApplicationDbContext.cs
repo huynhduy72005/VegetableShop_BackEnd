@@ -26,6 +26,11 @@ namespace VegetableShopAPI.Data
         public DbSet<BatchDisposalLog> BatchDisposalLogs { get; set; }
         public DbSet<Supplier> Suppliers { get; set; }
 
+        // Quản lý Nội dung & Phản hồi khách hàng
+        public DbSet<KitchenTip> KitchenTips { get; set; }
+        public DbSet<ProductReview> ProductReviews { get; set; }
+        public DbSet<ContactMessage> ContactMessages { get; set; }
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             modelBuilder.Entity<User>(entity =>
@@ -178,6 +183,47 @@ namespace VegetableShopAPI.Data
                     .WithMany()
                     .HasForeignKey(d => d.ProductBatchId)
                     .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            // Cấu hình bảng KitchenTips (Mẹo hay nhà bếp)
+            modelBuilder.Entity<KitchenTip>(entity =>
+            {
+                entity.ToTable("KitchenTips");
+
+                entity.HasIndex(t => t.Category);
+                entity.HasIndex(t => t.IsPublished);
+
+                entity.Property(t => t.IsPublished)
+                    .HasDefaultValue(true);
+            });
+
+            // Cấu hình bảng ProductReviews (Đánh giá sản phẩm)
+            modelBuilder.Entity<ProductReview>(entity =>
+            {
+                entity.ToTable("ProductReviews");
+
+                entity.HasIndex(r => r.ProductId);
+                entity.HasIndex(r => r.Rating);
+                entity.HasIndex(r => r.IsHidden);
+
+                entity.HasOne(r => r.Product)
+                    .WithMany()
+                    .HasForeignKey(r => r.ProductId)
+                    .OnDelete(DeleteBehavior.Cascade);
+
+                entity.HasOne(r => r.User)
+                    .WithMany()
+                    .HasForeignKey(r => r.UserId)
+                    .OnDelete(DeleteBehavior.NoAction);
+            });
+
+            // Cấu hình bảng ContactMessages (Liên hệ & Khiếu nại)
+            modelBuilder.Entity<ContactMessage>(entity =>
+            {
+                entity.ToTable("ContactMessages");
+
+                entity.HasIndex(c => c.Status);
+                entity.HasIndex(c => c.CreatedAt);
             });
         }
     }
