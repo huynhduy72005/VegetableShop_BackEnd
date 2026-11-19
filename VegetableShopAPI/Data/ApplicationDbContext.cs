@@ -13,6 +13,7 @@ namespace VegetableShopAPI.Data
         public DbSet<Order> Orders { get; set; }
         public DbSet<OrderDetail> OrderDetails { get; set; }
         public DbSet<PasswordResetRequest> PasswordResetRequests { get; set; }
+        public DbSet<PasswordResetOtp> PasswordResetOtps { get; set; }
         public DbSet<Employee> Employees { get; set; }
         public DbSet<EmployeeActivityLog> EmployeeActivityLogs { get; set; }
 
@@ -50,6 +51,18 @@ namespace VegetableShopAPI.Data
             modelBuilder.Entity<PasswordResetRequest>()
                 .Property(request => request.NewPasswordHash)
                 .HasMaxLength(500);
+
+            modelBuilder.Entity<PasswordResetOtp>(entity =>
+            {
+                entity.ToTable("PasswordResetOtps");
+                entity.HasIndex(otp => otp.UserId).IsUnique();
+                entity.Property(otp => otp.CodeHash).HasMaxLength(100);
+                entity.Property(otp => otp.Salt).HasMaxLength(100);
+                entity.HasOne(otp => otp.User)
+                    .WithMany()
+                    .HasForeignKey(otp => otp.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
 
             modelBuilder.Entity<Product>()
                 .HasOne<Category>()

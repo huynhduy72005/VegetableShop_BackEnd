@@ -9,6 +9,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.RegularExpressions;
+using System.Net.Sockets;
+using System.Security.Authentication;
 using Microsoft.IdentityModel.Tokens;
 using VegetableShopAPI.Data;
 using VegetableShopAPI.Models;
@@ -249,161 +251,224 @@ namespace VegetableShopAPI.Controllers
             user.AvatarUrl
         };
 
-        [HttpPost("password-reset-eligibility")]
-        public async Task<IActionResult> CheckPasswordResetEligibility(
-            [FromBody] PasswordResetEligibilityDto dto)
+        [AllowAnonymous]
+        [HttpPost("password-reset/send-otp")]
+        public async Task<IActionResult> SendPasswordResetOtp(
+            [FromBody] SendPasswordResetOtpDto dto)
         {
-            var account = await _context.Users
-                .Where(user => user.Email.ToLower() == dto.Email.Trim().ToLower())
-                .Select(user => new
-                {
-                    user.Role,
-                    user.IsVipAdmin
-                })
-                .FirstOrDefaultAsync();
+            const int resendDelaySeconds = 60;
+            var now = DateTime.UtcNow;
+            var email = dto.Email.Trim().ToLowerInvariant();
+            await using var transaction = await _context.Database.BeginTransactionAsync(
+                System.Data.IsolationLevel.Serializable);
 
-            if (account == null)
-                return NotFound(new { message = "Không tìm thấy tài khoản với email này." });
-
-            if (account.IsVipAdmin)
+            var user = await _context.Users.FirstOrDefaultAsync(account =>
+                account.Email.ToLower() == email && account.IsActive);
+            if (user == null)
             {
-                return StatusCode(StatusCodes.Status403Forbidden, new
+                await transaction.CommitAsync();
+                return Ok(new
                 {
-                    message = "Quản trị viên VIP không thể dùng chức năng tự phục vụ quên mật khẩu."
+                    success = true,
+                    message = "Nếu email thuộc tài khoản đang hoạt động, mã OTP sẽ được gửi."
                 });
             }
-
-            return Ok(new { requiresAdminRecoveryKey = account.Role == "Admin" });
-        }
-
-        [HttpPost("password-reset-requests")]
-        public async Task<IActionResult> CreatePasswordResetRequest(
-            [FromBody] CreatePasswordResetRequestDto dto)
-        {
-            var user = await _context.Users.FirstOrDefaultAsync(
-                account => account.Email.ToLower() == dto.Email.Trim().ToLower());
-
-            if (user == null)
-                return Ok(new { success = true, status = "Pending" });
 
             if (user.IsVipAdmin)
             {
                 return StatusCode(StatusCodes.Status403Forbidden, new
                 {
-                    message = "Quản trị viên VIP không thể gửi yêu cầu tự phục vụ quên mật khẩu."
+                    message = "Quản trị viên VIP không thể khôi phục mật khẩu bằng OTP."
                 });
             }
 
-            if (user.Role == "Admin")
+            var otp = await _context.PasswordResetOtps
+                .FirstOrDefaultAsync(item => item.UserId == user.Id);
+            if (otp != null &&
+                otp.CreatedAtUtc > now.AddSeconds(-resendDelaySeconds))
             {
-                var recoveryKey = _configuration["PasswordRecovery:AdminKey"];
-                if (string.IsNullOrEmpty(recoveryKey) ||
-                    Encoding.UTF8.GetByteCount(recoveryKey) < 32)
-                {
-                    return StatusCode(StatusCodes.Status503ServiceUnavailable, new
-                    {
-                        message = "Mã khôi phục admin chưa được cấu hình an toàn trong backend."
-                    });
-                }
-
-                if (!FixedTimeEquals(dto.AdminRecoveryKey, recoveryKey))
-                {
-                    return Unauthorized(new
-                    {
-                        message = "Mã khôi phục admin không hợp lệ hoặc chưa được cấu hình."
-                    });
-                }
-
-                user.PasswordHash = _credentials.HashPassword(user, dto.NewPassword);
-                user.MustChangePassword = false;
-                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
                 return Ok(new
                 {
                     success = true,
-                    status = "Approved",
-                    message = "Mật khẩu admin đã được cập nhật."
+                    message = "Nếu email thuộc tài khoản đang hoạt động, mã OTP sẽ được gửi."
                 });
             }
 
-            var existingRequest = await _context.PasswordResetRequests
-                .Where(request => request.UserId == user.Id && request.Status == "Pending")
-                .OrderByDescending(request => request.CreatedAtUtc)
-                .FirstOrDefaultAsync();
-            if (existingRequest != null)
+            var code = RandomNumberGenerator.GetInt32(0, 1_000_000)
+                .ToString("D6", System.Globalization.CultureInfo.InvariantCulture);
+            var salt = RandomNumberGenerator.GetBytes(16);
+            var codeHash = Rfc2898DeriveBytes.Pbkdf2(
+                Encoding.UTF8.GetBytes(code),
+                salt,
+                100_000,
+                HashAlgorithmName.SHA256,
+                32);
+
+            if (otp == null)
             {
-                return Ok(new
-                {
-                    success = true,
-                    status = existingRequest.Status,
-                    requestId = existingRequest.Id
-                });
+                otp = new PasswordResetOtp { UserId = user.Id };
+                _context.PasswordResetOtps.Add(otp);
             }
 
-            var request = new PasswordResetRequest
-            {
-                Id = Guid.NewGuid(),
-                UserId = user.Id,
-                EncryptedPassword = string.Empty,
-                NewPasswordHash = _credentials.HashPassword(user, dto.NewPassword),
-                Status = "Pending",
-                CreatedAtUtc = DateTime.UtcNow
-            };
-            _context.PasswordResetRequests.Add(request);
+            otp.CodeHash = Convert.ToBase64String(codeHash);
+            otp.Salt = Convert.ToBase64String(salt);
+            otp.CreatedAtUtc = now;
+            otp.ExpiresAtUtc = now.AddMinutes(10);
+            otp.UsedAtUtc = null;
+            otp.FailedAttempts = 0;
             await _context.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            var safeName = HtmlEncoder.Default.Encode(user.FullName);
+            var emailBody = $"""
+                <p>Xin chào {safeName},</p>
+                <p>Mã OTP để đặt lại mật khẩu VegetableShop của bạn là:</p>
+                <p style="font-size:28px;font-weight:bold;letter-spacing:8px">{code}</p>
+                <p>Mã có hiệu lực trong 10 phút và chỉ sử dụng được một lần.</p>
+                <p>Nếu bạn không yêu cầu đặt lại mật khẩu, hãy bỏ qua email này.</p>
+                """;
+            try
+            {
+                await _emailService.SendEmailAsync(
+                    user.Email,
+                    "Mã OTP đặt lại mật khẩu VegetableShop",
+                    emailBody);
+            }
+            catch (Exception exception) when (
+                exception is MailKit.Net.Smtp.SmtpCommandException or
+                MailKit.Net.Smtp.SmtpProtocolException or
+                IOException or
+                SocketException or
+                AuthenticationException or
+                FormatException or
+                ArgumentException)
+            {
+                otp.UsedAtUtc = DateTime.UtcNow;
+                otp.ExpiresAtUtc = DateTime.UtcNow;
+                otp.CreatedAtUtc = DateTime.UtcNow.AddSeconds(-(resendDelaySeconds + 1));
+                await _context.SaveChangesAsync();
+                _logger.LogError(
+                    exception,
+                    "Failed to send password reset OTP for user {UserId}.",
+                    user.Id);
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+                {
+                    message = "Không gửi được email OTP. Vui lòng kiểm tra cấu hình email hoặc thử lại."
+                });
+            }
 
             return Ok(new
             {
                 success = true,
-                status = request.Status,
-                requestId = request.Id
+                message = "Nếu email thuộc tài khoản đang hoạt động, mã OTP sẽ được gửi."
             });
         }
 
         [AllowAnonymous]
-        [HttpPost("vip/emergency-password-reset")]
-        public async Task<IActionResult> EmergencyVipPasswordReset(
-            [FromBody] VipEmergencyPasswordResetDto dto)
+        [HttpPost("password-reset/confirm")]
+        public async Task<IActionResult> ConfirmPasswordReset(
+            [FromBody] ConfirmPasswordResetDto dto)
         {
-            var recoveryKey = _configuration["PasswordRecovery:VipEmergencyKey"];
-            if (string.IsNullOrEmpty(recoveryKey) ||
-                Encoding.UTF8.GetByteCount(recoveryKey) < 32)
-            {
-                return StatusCode(StatusCodes.Status503ServiceUnavailable, new
-                {
-                    message = "Secret khôi phục khẩn cấp VIP chưa được cấu hình an toàn."
-                });
-            }
-
-            if (!FixedTimeEquals(dto.RecoveryKey, recoveryKey))
-            {
-                return Unauthorized(new
-                {
-                    message = "Secret khôi phục khẩn cấp không hợp lệ."
-                });
-            }
+            const int maxFailedAttempts = 5;
+            var now = DateTime.UtcNow;
+            var email = dto.Email.Trim().ToLowerInvariant();
+            await using var transaction = await _context.Database.BeginTransactionAsync(
+                System.Data.IsolationLevel.Serializable);
 
             var user = await _context.Users.FirstOrDefaultAsync(account =>
-                account.Email.ToLower() == "admin@gmail.com" &&
-                account.IsVipAdmin);
+                account.Email.ToLower() == email && account.IsActive);
+            var invalidOtp = new { message = "Mã OTP không hợp lệ hoặc đã hết hạn." };
             if (user == null)
-                return NotFound(new { message = "Không tìm thấy tài khoản Quản trị viên VIP." });
+                return BadRequest(invalidOtp);
 
+            if (user.IsVipAdmin)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new
+                {
+                    message = "Quản trị viên VIP không thể khôi phục mật khẩu bằng OTP."
+                });
+            }
+
+            var otp = await _context.PasswordResetOtps
+                .FirstOrDefaultAsync(item => item.UserId == user.Id);
+            if (otp == null || otp.UsedAtUtc != null)
+                return BadRequest(invalidOtp);
+
+            if (otp.ExpiresAtUtc <= now || otp.FailedAttempts >= maxFailedAttempts)
+            {
+                otp.UsedAtUtc = now;
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+                return BadRequest(invalidOtp);
+            }
+
+            var expectedHash = Convert.FromBase64String(otp.CodeHash);
+            var actualHash = Rfc2898DeriveBytes.Pbkdf2(
+                Encoding.UTF8.GetBytes(dto.Code),
+                Convert.FromBase64String(otp.Salt),
+                100_000,
+                HashAlgorithmName.SHA256,
+                32);
+            if (!CryptographicOperations.FixedTimeEquals(expectedHash, actualHash))
+            {
+                otp.FailedAttempts++;
+                if (otp.FailedAttempts >= maxFailedAttempts)
+                    otp.UsedAtUtc = now;
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+                return BadRequest(invalidOtp);
+            }
+
+            otp.UsedAtUtc = now;
             user.PasswordHash = _credentials.HashPassword(user, dto.NewPassword);
             user.MustChangePassword = false;
-            _context.EmployeeActivityLogs.Add(new EmployeeActivityLog
+
+            var pendingRequests = await _context.PasswordResetRequests
+                .Where(request => request.UserId == user.Id && request.Status == "Pending")
+                .ToListAsync();
+            foreach (var request in pendingRequests)
             {
-                Action = "VIP_EMERGENCY_PASSWORD_RESET",
-                Details = "Khôi phục mật khẩu Quản trị viên VIP bằng secret vận hành.",
-                CreatedAt = DateTime.UtcNow
-            });
+                request.EncryptedPassword = string.Empty;
+                request.NewPasswordHash = null;
+                request.Status = "Rejected";
+                request.ReviewedAtUtc = now;
+            }
+
             await _context.SaveChangesAsync();
+            await transaction.CommitAsync();
 
             return Ok(new
             {
                 success = true,
-                message = "Đã khôi phục mật khẩu Quản trị viên VIP."
+                message = "Đặt lại mật khẩu thành công. Bạn có thể đăng nhập bằng mật khẩu mới."
             });
         }
+
+        [HttpPost("password-reset-eligibility")]
+        public IActionResult CheckPasswordResetEligibility(
+            [FromBody] PasswordResetEligibilityDto dto) =>
+            StatusCode(StatusCodes.Status410Gone, new
+            {
+                message = "Luồng khôi phục cũ đã ngừng hoạt động. Hãy dùng xác minh OTP qua email."
+            });
+
+        [HttpPost("password-reset-requests")]
+        public IActionResult CreatePasswordResetRequest(
+            [FromBody] CreatePasswordResetRequestDto dto) =>
+            StatusCode(StatusCodes.Status410Gone, new
+            {
+                message = "Không còn gửi yêu cầu đổi mật khẩu cho admin. Hãy dùng xác minh OTP qua email."
+            });
+
+        [AllowAnonymous]
+        [HttpPost("vip/emergency-password-reset")]
+        public IActionResult EmergencyVipPasswordReset(
+            [FromBody] VipEmergencyPasswordResetDto dto) =>
+            StatusCode(StatusCodes.Status410Gone, new
+            {
+                message = "Luồng khôi phục cũ đã ngừng hoạt động. Hãy dùng xác minh OTP qua email."
+            });
 
         [HttpGet("password-reset-requests/{id:guid}/status")]
         public async Task<IActionResult> GetPasswordResetRequestStatus(Guid id)
@@ -943,6 +1008,30 @@ namespace VegetableShopAPI.Controllers
             public string? AvatarUrl { get; set; }
         }
 
+        public class SendPasswordResetOtpDto
+        {
+            [Required]
+            [EmailAddress]
+            [StringLength(254)]
+            public string Email { get; set; } = string.Empty;
+        }
+
+        public class ConfirmPasswordResetDto
+        {
+            [Required]
+            [EmailAddress]
+            [StringLength(254)]
+            public string Email { get; set; } = string.Empty;
+
+            [Required]
+            [RegularExpression(@"^\d{6}$")]
+            public string Code { get; set; } = string.Empty;
+
+            [Required]
+            [MinLength(8)]
+            public string NewPassword { get; set; } = string.Empty;
+        }
+
         public class CreatePasswordResetRequestDto
         {
             [Required]
@@ -971,14 +1060,6 @@ namespace VegetableShopAPI.Controllers
             [Required]
             [EmailAddress]
             public string Email { get; set; } = string.Empty;
-        }
-
-        private static bool FixedTimeEquals(string submittedKey, string configuredKey)
-        {
-            var submittedBytes = Encoding.UTF8.GetBytes(submittedKey ?? string.Empty);
-            var configuredBytes = Encoding.UTF8.GetBytes(configuredKey);
-            return submittedBytes.Length == configuredBytes.Length &&
-                CryptographicOperations.FixedTimeEquals(submittedBytes, configuredBytes);
         }
 
     }
