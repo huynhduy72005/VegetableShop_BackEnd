@@ -231,6 +231,78 @@ namespace VegetableShopAPI.Controllers
             }
         }
 
+       
+        // GET: api/orders/pending-summary (Kiểm tra nhanh đơn chờ xác nhận cho chuông báo Real-time)
+        [HttpGet("pending-summary")]
+        [Authorize]
+        public async Task<IActionResult> GetPendingSummary()
+        {
+            if (!await _permissions.CanManageOrdersAsync(User))
+                return Forbid();
+
+            var pendingOrders = await (
+                from o in _context.Orders.AsNoTracking()
+                where o.Status == "Pending"
+                join usr in _context.Users.AsNoTracking() on o.UserId equals usr.Id into userGroup
+                from u in userGroup.DefaultIfEmpty()
+                orderby o.Id descending
+                select new
+                {
+                    o.Id,
+                    CustomerName = !string.IsNullOrWhiteSpace(o.RecipientName)
+                        ? o.RecipientName
+                        : (u != null ? u.FullName : "Khách vãng lai"),
+                    o.TotalPrice,
+                    o.OrderDate
+                }
+            ).ToListAsync();
+
+            var latest = pendingOrders.FirstOrDefault();
+            object? latestOrderPayload = null;
+
+            if (latest != null)
+            {
+                var firstItem = await (
+                    from d in _context.OrderDetails.AsNoTracking()
+                    where d.OrderId == latest.Id
+                    orderby d.Id ascending
+                    join prod in _context.Products.AsNoTracking() on d.ProductId equals prod.Id into productGroup
+                    from p in productGroup.DefaultIfEmpty()
+                    join variant in _context.ProductVariants.AsNoTracking() on d.ProductVariantId equals (int?)variant.Id into variantGroup
+                    from v in variantGroup.DefaultIfEmpty()
+                    select new
+                    {
+                        ProductName = p != null ? p.Name : null,
+                        d.VariantName,
+                        ProductImage = d.ProductVariantId != null && v != null && v.Image != null && v.Image != ""
+                            ? v.Image
+                            : (p != null ? p.Image : null)
+                    }
+                ).FirstOrDefaultAsync();
+
+                var itemCount = await _context.OrderDetails.AsNoTracking()
+                    .CountAsync(d => d.OrderId == latest.Id);
+
+                latestOrderPayload = new
+                {
+                    latest.Id,
+                    latest.CustomerName,
+                    latest.TotalPrice,
+                    latest.OrderDate,
+                    ProductName = firstItem?.ProductName,
+                    VariantName = firstItem?.VariantName,
+                    ProductImage = firstItem?.ProductImage,
+                    ItemCount = itemCount
+                };
+            }
+
+            return Ok(new
+            {
+                pendingCount = pendingOrders.Count,
+                latestOrderId = latest?.Id ?? 0,
+                latestOrder = latestOrderPayload
+            });
+        }
         // GET: api/orders/revenue (Thống kê tổng quát cho thẻ đầu trang Tổng quan)
         [HttpGet("revenue")]
         [Authorize]
