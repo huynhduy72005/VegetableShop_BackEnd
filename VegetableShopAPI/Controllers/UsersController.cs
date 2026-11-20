@@ -28,6 +28,7 @@ namespace VegetableShopAPI.Controllers
         private readonly AccountCredentialService _credentials;
         private readonly EmployeeCodeService _employeeCodes;
         private readonly IEmailService _emailService;
+        private readonly EmployeeNotificationService _employeeNotifications;
         private readonly ILogger<UsersController> _logger;
 
         public UsersController(
@@ -37,6 +38,7 @@ namespace VegetableShopAPI.Controllers
             AccountCredentialService credentials,
             EmployeeCodeService employeeCodes,
             IEmailService emailService,
+            EmployeeNotificationService employeeNotifications,
             ILogger<UsersController> logger)
         {
             _context = context;
@@ -46,6 +48,7 @@ namespace VegetableShopAPI.Controllers
             _credentials = credentials;
             _employeeCodes = employeeCodes;
             _emailService = emailService;
+            _employeeNotifications = employeeNotifications;
             _logger = logger;
         }
 
@@ -65,7 +68,6 @@ namespace VegetableShopAPI.Controllers
                 Email = email,
                 PasswordHash = string.Empty,
                 IsActive = true,
-                MustChangePassword = false,
                 Role = "Customer"
             };
             user.PasswordHash = _credentials.HashPassword(user, input.Password);
@@ -196,9 +198,7 @@ namespace VegetableShopAPI.Controllers
             return Ok(new
             {
                 success = true,
-                message = user.MustChangePassword
-                    ? "Đăng nhập thành công. Hãy đổi mật khẩu trước khi tiếp tục."
-                    : "Đăng nhập thành công!",
+                message = "Đăng nhập thành công!",
                 token = CreateJwtToken(user),
                 user = UserResponse(user)
             });
@@ -220,7 +220,6 @@ namespace VegetableShopAPI.Controllers
                 new Claim(ClaimTypes.Email, user.Email),
                 new Claim(ClaimTypes.Role, user.Role),
                 new Claim("admin_vip", user.IsVipAdmin.ToString().ToLowerInvariant()),
-                new Claim("must_change_password", user.MustChangePassword.ToString().ToLowerInvariant()),
                 new Claim("password_fingerprint", Convert.ToHexString(
                     HMACSHA256.HashData(
                         Encoding.UTF8.GetBytes(jwtKey),
@@ -247,7 +246,6 @@ namespace VegetableShopAPI.Controllers
             user.Role,
             user.IsVipAdmin,
             user.IsActive,
-            user.MustChangePassword,
             user.AvatarUrl
         };
 
@@ -422,7 +420,6 @@ namespace VegetableShopAPI.Controllers
 
             otp.UsedAtUtc = now;
             user.PasswordHash = _credentials.HashPassword(user, dto.NewPassword);
-            user.MustChangePassword = false;
 
             var pendingRequests = await _context.PasswordResetRequests
                 .Where(request => request.UserId == user.Id && request.Status == "Pending")
@@ -532,7 +529,6 @@ namespace VegetableShopAPI.Controllers
                     request.User,
                     _passwordProtector.Unprotect(request.EncryptedPassword))
                 : request.NewPasswordHash;
-            request.User.MustChangePassword = false;
             request.NewPasswordHash = null;
             request.EncryptedPassword = string.Empty;
             request.Status = "Approved";
@@ -609,7 +605,6 @@ namespace VegetableShopAPI.Controllers
             }
 
             user.PasswordHash = _credentials.HashPassword(user, dto.NewPassword);
-            user.MustChangePassword = false;
             await _context.SaveChangesAsync();
 
             return Ok(new
@@ -756,7 +751,6 @@ namespace VegetableShopAPI.Controllers
                     user.Role,
                     user.IsVipAdmin,
                     user.IsActive,
-                    user.MustChangePassword,
                     user.Phone,
                     user.Gender,
                     user.DateOfBirth
@@ -815,7 +809,28 @@ namespace VegetableShopAPI.Controllers
             });
             await _context.SaveChangesAsync();
             await transaction.CommitAsync();
-            return Ok(new { success = true, message = "Cập nhật quyền thành công!" });
+
+            var roleChanged = oldRole != user.Role;
+            bool? emailSent = null;
+            if (roleChanged)
+            {
+                emailSent = await _employeeNotifications.SendAccountChangedAsync(
+                    user.FullName,
+                    user.Email,
+                    employee?.EmployeeCode,
+                    oldRole,
+                    user.Role,
+                    null,
+                    null);
+            }
+
+            var message = emailSent switch
+            {
+                true => "Cập nhật quyền thành công và đã gửi email thông báo.",
+                false => "Đã cập nhật quyền nhưng chưa gửi được email thông báo.",
+                _ => "Cập nhật quyền thành công!"
+            };
+            return Ok(new { success = true, emailSent, message });
         }
 
         // DELETE: api/users/5 (Vô hiệu hóa tài khoản, giữ nguyên lịch sử liên quan)
@@ -860,7 +875,6 @@ namespace VegetableShopAPI.Controllers
             }
 
             user.IsActive = false;
-            user.MustChangePassword = false;
             if (employee == null)
             {
                 _context.EmployeeActivityLogs.Add(new EmployeeActivityLog
@@ -872,10 +886,21 @@ namespace VegetableShopAPI.Controllers
                 });
             }
             await _context.SaveChangesAsync();
+            var emailSent = await _employeeNotifications.SendAccountChangedAsync(
+                user.FullName,
+                user.Email,
+                employee?.EmployeeCode,
+                null,
+                null,
+                false,
+                employee == null ? null : false);
             return Ok(new
             {
                 success = true,
-                message = "Đã vô hiệu hóa tài khoản. Lịch sử đơn hàng được giữ nguyên."
+                emailSent,
+                message = emailSent
+                    ? "Đã vô hiệu hóa tài khoản và gửi email thông báo. Lịch sử đơn hàng được giữ nguyên."
+                    : "Đã vô hiệu hóa tài khoản nhưng chưa gửi được email thông báo. Lịch sử đơn hàng được giữ nguyên."
             });
         }
 

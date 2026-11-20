@@ -762,11 +762,6 @@ namespace VegetableShopAPI.Migrations
                     b.Property<bool>("IsVipAdmin")
                         .HasColumnType("bit");
 
-                    b.Property<bool>("MustChangePassword")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(false);
-
                     b.Property<string>("PasswordHash")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");

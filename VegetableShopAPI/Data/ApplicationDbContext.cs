@@ -46,9 +46,6 @@ namespace VegetableShopAPI.Data
                 entity.Property(user => user.IsActive)
                     .HasDefaultValue(true);
 
-                entity.Property(user => user.MustChangePassword)
-                    .HasDefaultValue(false);
-
                 entity.Property(user => user.PasswordHash)
                     .IsRequired();
             });

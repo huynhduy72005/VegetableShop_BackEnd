@@ -19,15 +19,18 @@ public class EmployeesController : ControllerBase
     private readonly ApplicationDbContext _db;
     private readonly AccountCredentialService _credentials;
     private readonly EmployeeCodeService _employeeCodes;
+    private readonly EmployeeNotificationService _employeeNotifications;
 
     public EmployeesController(
         ApplicationDbContext db,
         AccountCredentialService credentials,
-        EmployeeCodeService employeeCodes)
+        EmployeeCodeService employeeCodes,
+        EmployeeNotificationService employeeNotifications)
     {
         _db = db;
         _credentials = credentials;
         _employeeCodes = employeeCodes;
+        _employeeNotifications = employeeNotifications;
     }
 
     private int? CurrentUserId =>
@@ -104,13 +107,6 @@ public class EmployeesController : ControllerBase
                             user.Email.ToLower() == employee.Email.ToLower()))
                     .Select(user => (bool?)user.IsActive)
                     .FirstOrDefault(),
-                MustChangePassword = _db.Users
-                    .Where(user =>
-                        (int?)user.Id == employee.UserId ||
-                        (employee.UserId == null &&
-                            user.Email.ToLower() == employee.Email.ToLower()))
-                    .Select(user => (bool?)user.MustChangePassword)
-                    .FirstOrDefault(),
                 CanManageProducts = employee.CanManageProducts,
                 CanManageOrders = employee.CanManageOrders,
                 CanManageInventory = employee.CanManageInventory
@@ -157,7 +153,6 @@ public class EmployeesController : ControllerBase
                 UserRole = user.Role,
                 IsVipAdmin = user.IsVipAdmin,
                 AccountIsActive = user.IsActive,
-                MustChangePassword = user.MustChangePassword,
                 ProfilePending = true
             })
             .ToListAsync();
@@ -265,8 +260,7 @@ public class EmployeesController : ControllerBase
                 Email = email,
                 Phone = phone,
                 Role = role,
-                IsActive = input.AccountIsActive,
-                MustChangePassword = true
+                IsActive = input.AccountIsActive
             };
             linkedUser.PasswordHash = _credentials.HashPassword(
                 linkedUser,
@@ -324,6 +318,11 @@ public class EmployeesController : ControllerBase
 
         await tx.CommitAsync();
 
+        var emailSent = await _employeeNotifications.SendEmployeeAddedAsync(
+            employee.FullName,
+            employee.Email,
+            employee.EmployeeCode,
+            employee.Position);
         var response = await GetEmployeeResponses()
             .FirstAsync(e => e.Id == employee.Id);
         return CreatedAtAction(
@@ -331,6 +330,10 @@ public class EmployeesController : ControllerBase
             new { id = employee.Id },
             new
             {
+                emailSent,
+                message = emailSent
+                    ? "Đã thêm nhân viên và gửi email thông báo."
+                    : "Đã thêm nhân viên nhưng chưa gửi được email thông báo.",
                 employee = response,
                 initialCredentials = linkedUser != null && input.CreateAccount
                     ? new
@@ -521,6 +524,11 @@ public class EmployeesController : ControllerBase
         }
 
         var oldRole = linkedUser?.Role;
+        var oldAccountIsActive = linkedUser?.IsActive;
+        var oldEmployeeIsActive = employee.Status == "Active";
+        var oldCanManageProducts = employee.CanManageProducts;
+        var oldCanManageOrders = employee.CanManageOrders;
+        var oldCanManageInventory = employee.CanManageInventory;
         var targetRole = string.IsNullOrWhiteSpace(input.UserRole)
             ? wasUnlinked && linkedUser != null
                 ? RoleFromEmployeeCode(employee.EmployeeCode)
@@ -582,8 +590,60 @@ public class EmployeesController : ControllerBase
         await _db.SaveChangesAsync();
         await tx.CommitAsync();
 
-        return Ok(await GetEmployeeResponses()
-            .FirstAsync(e => e.Id == id));
+        var roleChanged = linkedUser != null && oldRole != linkedUser.Role;
+        var accountDeactivated = oldAccountIsActive == true &&
+            linkedUser?.IsActive == false;
+        var employeeDeactivated = oldEmployeeIsActive &&
+            employee.Status == "Inactive";
+        var permissionChanges = new List<string>();
+        if (oldCanManageProducts != employee.CanManageProducts)
+        {
+            permissionChanges.Add(
+                employee.CanManageProducts
+                    ? "Bạn được cấp quyền quản lý sản phẩm."
+                    : "Quyền quản lý sản phẩm của bạn đã bị gỡ.");
+        }
+        if (oldCanManageOrders != employee.CanManageOrders)
+        {
+            permissionChanges.Add(
+                employee.CanManageOrders
+                    ? "Bạn được cấp quyền quản lý đơn hàng."
+                    : "Quyền quản lý đơn hàng của bạn đã bị gỡ.");
+        }
+        if (oldCanManageInventory != employee.CanManageInventory)
+        {
+            permissionChanges.Add(
+                employee.CanManageInventory
+                    ? "Bạn được cấp quyền quản lý kho."
+                    : "Quyền quản lý kho của bạn đã bị gỡ.");
+        }
+
+        bool? emailSent = null;
+        if (roleChanged ||
+            accountDeactivated ||
+            employeeDeactivated ||
+            permissionChanges.Count > 0)
+        {
+            emailSent = await _employeeNotifications.SendAccountChangedAsync(
+                linkedUser?.FullName ?? employee.FullName,
+                linkedUser?.Email ?? employee.Email,
+                employee.EmployeeCode,
+                roleChanged ? oldRole : null,
+                roleChanged ? linkedUser!.Role : null,
+                accountDeactivated ? false : null,
+                employeeDeactivated ? false : null,
+                permissionChanges);
+        }
+
+        var response = await GetEmployeeResponses()
+            .FirstAsync(e => e.Id == id);
+        var message = emailSent switch
+        {
+            true => "Đã cập nhật quyền hoặc trạng thái và gửi email thông báo.",
+            false => "Đã cập nhật quyền hoặc trạng thái nhưng chưa gửi được email thông báo.",
+            _ => "Cập nhật quyền thành công."
+        };
+        return Ok(new { employee = response, emailSent, message });
     }
 
     // Nhật ký hoạt động
@@ -624,7 +684,6 @@ public class EmployeeResponse
     public string? UserRole { get; set; }
     public bool? IsVipAdmin { get; set; }
     public bool? AccountIsActive { get; set; }
-    public bool? MustChangePassword { get; set; }
     public bool ProfilePending { get; set; }
     public bool CanManageProducts { get; set; }
     public bool CanManageOrders { get; set; }

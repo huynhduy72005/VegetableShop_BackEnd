@@ -44,6 +44,7 @@ builder.Services.AddSwaggerGen();
 builder.Services.AddHttpClient();
 
 builder.Services.AddScoped<IEmailService, EmailService>();
+builder.Services.AddScoped<EmployeeNotificationService>();
 builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
 builder.Services.AddScoped<AccountCredentialService>();
 builder.Services.AddScoped<EmployeeCodeService>();
@@ -177,29 +178,6 @@ app.UseCors("AllowReactApp");
 app.UseStaticFiles();
 
 app.UseAuthentication();
-app.Use(async (context, next) =>
-{
-    var requiresPasswordChange =
-        !context.User.HasClaim("admin_vip", "true") &&
-        context.User.HasClaim("must_change_password", "true");
-    var isChangePasswordRequest =
-        context.Request.Path.Value?.StartsWith(
-            "/api/users/change-password/",
-            StringComparison.OrdinalIgnoreCase) == true;
-
-    if (requiresPasswordChange && !isChangePasswordRequest)
-    {
-        context.Response.StatusCode = StatusCodes.Status403Forbidden;
-        await context.Response.WriteAsJsonAsync(new
-        {
-            code = "PASSWORD_CHANGE_REQUIRED",
-            message = "Bạn cần đổi mật khẩu trước khi sử dụng hệ thống."
-        });
-        return;
-    }
-
-    await next();
-});
 app.UseAuthorization();
 
 app.MapControllers();
