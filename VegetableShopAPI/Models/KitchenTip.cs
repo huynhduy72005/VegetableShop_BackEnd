@@ -27,7 +27,7 @@ namespace VegetableShopAPI.Models
         // VD: "Mẹo bảo quản" | "Công thức nấu ăn" | "Dinh dưỡng xanh" | "Sơ chế sạch"
 
         [MaxLength(120)]
-        public string AuthorName { get; set; } = "Bếp Vườn Nhà";
+        public string AuthorName { get; set; } = "Bếp VEGETABLE";
 
         public bool IsPublished { get; set; } = true; // true: Hiển thị | false: Bản nháp / Ẩn
 

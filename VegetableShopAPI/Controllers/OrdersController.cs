@@ -692,7 +692,7 @@ namespace VegetableShopAPI.Controllers
                     .Where(p => productIds.Contains(p.Id))
                     .ToDictionaryAsync(p => p.Id, p => p.Name);
 
-                var subject = $"Xác nhận đơn hàng #{order.Id} - Vườn Nhà";
+                var subject = $"Xác nhận đơn hàng #{order.Id} - VEGETABLE";
                 var body = BuildOrderEmailBody(order, orderDto, productNames);
 
                 var sendTask = _emailService.SendEmailAsync(toEmail, subject, body);
@@ -822,7 +822,7 @@ namespace VegetableShopAPI.Controllers
 
             return $@"
 <div style='font-family:Arial,sans-serif;max-width:600px;margin:auto;color:#333;'>
-    <h2 style='color:#2e7d32;'>Cảm ơn {Encode(order.RecipientName)} đã đặt hàng tại Vườn Nhà 🥬</h2>
+    <h2 style='color:#2e7d32;'>Cảm ơn {Encode(order.RecipientName)} đã đặt hàng tại VEGETABLE 🥬</h2>
     <p>Đơn hàng của bạn đã được ghi nhận và đang chờ xử lý.</p>
 
     <p><b>Mã đơn hàng:</b> #{order.Id}<br/>

@@ -143,11 +143,11 @@ namespace VegetableShopAPI.Controllers
                 if (int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var uid))
                 {
                     var user = await _context.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == uid);
-                    authorName = !string.IsNullOrWhiteSpace(user?.FullName) ? user.FullName : "Bếp Vườn Nhà";
+                    authorName = !string.IsNullOrWhiteSpace(user?.FullName) ? user.FullName : "Bếp VEGETABLE";
                 }
                 else
                 {
-                    authorName = "Bếp Vườn Nhà";
+                    authorName = "Bếp VEGETABLE";
                 }
             }
 

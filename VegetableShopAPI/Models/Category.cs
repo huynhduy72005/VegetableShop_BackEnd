@@ -5,5 +5,6 @@
         public int Id { get; set; }
         public string Name { get; set; } = string.Empty; // Ví dụ: Rau xanh, Củ, Quả, Trái cây...
         public string? Description { get; set; }
+        public string Icon { get; set; } = "🥬";
     }
 }

@@ -18,7 +18,7 @@ namespace VegetableShopAPI.Controllers
             _context = context;
         }
 
-        // Tự động khởi tạo 3 mã mẫu cho Vườn Nhà nếu bảng Vouchers đang trống
+        // Tự động khởi tạo 3 mã mẫu cho VEGETABLE nếu bảng Vouchers đang trống
         private async Task EnsureSeedVouchersAsync()
         {
             if (await _context.Vouchers.AnyAsync()) return;
@@ -28,7 +28,7 @@ namespace VegetableShopAPI.Controllers
             {
                 new Voucher
                 {
-                    Code = "VUONNHA20",
+                    Code = "VEGETABLE20",
                     Title = "Giảm 20.000đ cho đơn rau củ từ 120.000đ",
                     Description = "Áp dụng cho toàn bộ rau hữu cơ và trái cây tươi theo mùa.",
                     DiscountType = "Fixed",

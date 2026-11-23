@@ -94,26 +94,26 @@ namespace VegetableShopAPI.Controllers
                                 <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width: 100%; max-width: 600px; background-color: #ffffff; border-radius: 16px; overflow: hidden;">
                                     <tr>
                                         <td align="center" style="padding: 28px 24px; background-color: #16834a; color: #ffffff;">
-                                            <div style="font-size: 15px; font-weight: bold; letter-spacing: 1px;">🌱 VƯỜN NHÀ</div>
+                                            <div style="font-size: 15px; font-weight: bold; letter-spacing: 1px;">🌱 VEGETABLE</div>
                                             <div style="margin-top: 12px; font-size: 32px;">👋</div>
                                             <h1 style="margin: 8px 0 0; font-size: 24px;">Xin chào, {name}!</h1>
                                         </td>
                                     </tr>
                                     <tr>
                                         <td style="padding: 32px 28px; color: #374151; font-size: 16px; line-height: 1.7;">
-                                            <h2 style="margin: 0 0 12px; color: #166534; font-size: 21px;">Chào mừng bạn đến với Vườn Nhà!</h2>
+                                            <h2 style="margin: 0 0 12px; color: #166534; font-size: 21px;">Chào mừng bạn đến với VEGETABLE!</h2>
                                             <p style="margin: 0 0 16px;">Tài khoản của bạn đã được tạo thành công. Cảm ơn bạn đã đăng ký và đồng hành cùng chúng tôi.</p>
                                             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin: 22px 0; background-color: #f0fdf4; border-radius: 10px;">
                                                 <tr>
                                                     <td style="padding: 16px; color: #166534;">🥬 <strong>Chúc bạn có những trải nghiệm mua sắm thật vui vẻ!</strong></td>
                                                 </tr>
                                             </table>
-                                            <p style="margin: 0;">Thân mến,<br /><strong style="color: #16834a;">Đội ngũ Vườn Nhà</strong> 💚</p>
+                                            <p style="margin: 0;">Thân mến,<br /><strong style="color: #16834a;">Đội ngũ VEGETABLE</strong> 💚</p>
                                         </td>
                                     </tr>
                                     <tr>
                                         <td align="center" style="padding: 16px 24px; background-color: #f9fafb; color: #9ca3af; font-size: 12px;">
-                                            Email này được gửi tự động sau khi bạn đăng ký tài khoản tại Vườn Nhà.
+                                            Email này được gửi tự động sau khi bạn đăng ký tài khoản tại VEGETABLE.
                                         </td>
                                     </tr>
                                 </table>
@@ -123,7 +123,7 @@ namespace VegetableShopAPI.Controllers
                     """;
                 var sendTask = _emailService.SendEmailAsync(
                     user.Email,
-                    "Chào mừng bạn đến với Vườn Nhà",
+                    "Chào mừng bạn đến với VEGETABLE",
                     body);
                 var completedTask = await Task.WhenAny(
                     sendTask,

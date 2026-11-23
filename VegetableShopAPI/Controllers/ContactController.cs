@@ -67,10 +67,10 @@ namespace VegetableShopAPI.Controllers
                 string? myAdminEmail = _config["EmailSettings:SenderEmail"];
                 if (!string.IsNullOrWhiteSpace(myAdminEmail))
                 {
-                    string emailSubject = $"[VƯỜN NHÀ - KHÁCH HÀNG LIÊN HỆ]: {contactRecord.Topic}";
+                    string emailSubject = $"[VEGETABLE - KHÁCH HÀNG LIÊN HỆ]: {contactRecord.Topic}";
                     string emailBody = $@"
                         <div style='font-family: Arial, sans-serif; padding: 20px; border: 1px solid #10b981; border-radius: 10px;'>
-                            <h2 style='color: #059669;'>🌱 Có tin nhắn liên hệ mới từ Website Vườn Nhà!</h2>
+                            <h2 style='color: #059669;'>🌱 Có tin nhắn liên hệ mới từ Website VEGETABLE!</h2>
                             <p><strong>Họ và tên:</strong> {contactRecord.FullName}</p>
                             <p><strong>Số điện thoại:</strong> {contactRecord.Phone ?? "Không cung cấp"}</p>
                             <p><strong>Email khách hàng:</strong> {contactRecord.Email}</p>

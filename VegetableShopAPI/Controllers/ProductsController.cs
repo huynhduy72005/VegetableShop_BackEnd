@@ -37,6 +37,53 @@ namespace VegetableShopAPI.Controllers
                 .ToListAsync();
         }
 
+        // GET: api/products/best-selling?top=4&days=30
+        [HttpGet("best-selling")]
+        public async Task<IActionResult> GetBestSellingProducts(
+            [FromQuery] int top = 4,
+            [FromQuery] int days = 30)
+        {
+            var safeTop = Math.Clamp(top, 1, 8);
+            var safeDays = Math.Clamp(days, 1, 365);
+            var endExclusive = DateTime.Today.AddDays(1);
+            var startDay = endExclusive.AddDays(-safeDays);
+
+            var salesByProduct =
+                from detail in _context.OrderDetails.AsNoTracking()
+                join order in _context.Orders.AsNoTracking()
+                    on detail.OrderId equals order.Id
+                where order.OrderDate >= startDay &&
+                      order.OrderDate < endExclusive &&
+                      order.Status != "Cancelled"
+                group detail by detail.ProductId into sales
+                select new
+                {
+                    ProductId = sales.Key,
+                    TotalQuantitySold = sales.Sum(detail => detail.Quantity)
+                };
+
+            var products = await (
+                from product in _context.Products.AsNoTracking()
+                join sales in salesByProduct
+                    on product.Id equals sales.ProductId
+                where product.IsVisible
+                orderby sales.TotalQuantitySold descending
+                select new
+                {
+                    id = product.Id,
+                    name = product.Name,
+                    price = product.Price,
+                    quantity = product.Quantity,
+                    unit = product.Unit,
+                    image = product.Image,
+                    totalQuantitySold = sales.TotalQuantitySold
+                })
+                .Take(safeTop)
+                .ToListAsync();
+
+            return Ok(products);
+        }
+
         // GET: api/products/5 (Lấy chi tiết sản phẩm theo ID, kèm biến thể & truy xuất nguồn gốc lô hiện tại)
         [HttpGet("{id}")]
         public async Task<IActionResult> GetProduct(int id)

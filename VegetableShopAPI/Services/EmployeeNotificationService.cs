@@ -26,19 +26,19 @@ public class EmployeeNotificationService
         var encodedPosition = HtmlEncoder.Default.Encode(position);
         var body = $"""
             <div style="font-family: Arial, Helvetica, sans-serif; color: #374151; line-height: 1.7;">
-                <h2 style="color: #16834a;">Thông báo nhân sự - Vườn Nhà</h2>
+                <h2 style="color: #16834a;">Thông báo nhân sự - VEGETABLE</h2>
                 <p>Xin chào {name},</p>
-                <p>Bạn đã được thêm vào đội ngũ nhân viên của cửa hàng Vườn Nhà.</p>
+                <p>Bạn đã được thêm vào đội ngũ nhân viên của cửa hàng VEGETABLE.</p>
                 <p><strong>Mã nhân viên:</strong> {code}<br />
                 <strong>Chức vụ:</strong> {encodedPosition}</p>
                 <p>Vui lòng liên hệ quản lý cửa hàng nếu bạn cần hỗ trợ về tài khoản hoặc công việc.</p>
-                <p>Thân mến,<br /><strong>Đội ngũ Vườn Nhà</strong></p>
+                <p>Thân mến,<br /><strong>Đội ngũ VEGETABLE</strong></p>
             </div>
             """;
 
         return TrySendAsync(
             email,
-            "Thông báo bạn đã trở thành nhân viên Vườn Nhà",
+            "Thông báo bạn đã trở thành nhân viên VEGETABLE",
             body);
     }
 
@@ -84,13 +84,13 @@ public class EmployeeNotificationService
             : $"<p><strong>Mã nhân viên:</strong> {HtmlEncoder.Default.Encode(employeeCode)}</p>";
         var body = $"""
             <div style="font-family: Arial, Helvetica, sans-serif; color: #374151; line-height: 1.7;">
-                <h2 style="color: #16834a;">Thông báo cập nhật tài khoản - Vườn Nhà</h2>
+                <h2 style="color: #16834a;">Thông báo cập nhật tài khoản - VEGETABLE</h2>
                 <p>Xin chào {name},</p>
                 <p>Thông tin quyền hoặc trạng thái tài khoản của bạn vừa được cập nhật:</p>
                 <ul>{changeList}</ul>
                 {codeLine}
                 <p>Nếu bạn cần hỗ trợ, vui lòng liên hệ quản lý cửa hàng.</p>
-                <p>Thân mến,<br /><strong>Đội ngũ Vườn Nhà</strong></p>
+                <p>Thân mến,<br /><strong>Đội ngũ VEGETABLE</strong></p>
             </div>
             """;
 

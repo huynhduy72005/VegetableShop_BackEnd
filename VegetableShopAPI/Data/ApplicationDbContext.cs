@@ -76,6 +76,10 @@ namespace VegetableShopAPI.Data
                 .Property(product => product.IsVisible)
                 .HasDefaultValue(true);
 
+            modelBuilder.Entity<Category>()
+                .Property(category => category.Icon)
+                .HasDefaultValue("🥬");
+
             modelBuilder.Entity<Order>()
                 .HasOne<User>()
                 .WithMany()
